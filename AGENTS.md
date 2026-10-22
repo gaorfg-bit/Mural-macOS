@@ -39,6 +39,14 @@ make render DOSSIER=<chemin>      # rendu hors ecran de l'interface
 - **Rendu hors ecran** : forcer l'apparence sur **l'application et la fenetre**, sinon
   les libelles sont blancs sur blanc hors bundle.
 
+- **Demonstration « sequentielle »** : `Reglages()` prend `diaporamaAleatoire = true`
+  par defaut (fidelite a `models.py:33`). Toute demonstration sequentielle doit
+  poser le drapeau a `false` **explicitement**, sinon elle tire au hasard en
+  s'appelant sequentielle — et on croit a un bug du moteur.
+- **Verifier la donnee avant d'accuser le moteur** : afficher la playlist (ou la
+  liste) avant de conclure. Trois faux diagnostics d'affilee venaient d'un
+  harnais trompeur, pas du code.
+
 ## Interdits
 
 - **Ne jamais modifier, deplacer ni supprimer une image de l'utilisateur.**
