@@ -23,6 +23,13 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
         // la meme interface dans un bitmap, sans afficher de fenetre et sans
         // permission systeme (aucune capture d'ecran).
         let arguments = CommandLine.arguments
+        if let position = arguments.firstIndex(of: "--appliquer") {
+            let image = URL(fileURLWithPath: arguments[position + 1])
+            let index = arguments.count > position + 2 ? (Int(arguments[position + 2]) ?? 0) : 0
+            appliquerEtVerifier(image: image, indexEcran: index)
+            NSApplication.shared.terminate(nil)
+            return
+        }
         if let position = arguments.firstIndex(of: "--essayer-application") {
             let dossier = arguments.count > position + 1
                 ? URL(fileURLWithPath: arguments[position + 1])
@@ -189,6 +196,29 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
         Journal.info("verifications des actions : \(echecs) echec(s)")
     }
 
+    /// Applique une image a un ecran et VERIFIE le resultat apres attente.
+    /// Sert aussi a rendre a l'utilisateur le fond d'ecran d'origine.
+    @MainActor
+    private func appliquerEtVerifier(image: URL, indexEcran: Int) {
+        guard let nsEcran = EcransService.nsEcran(index: indexEcran) else {
+            print("ecran \(indexEcran) introuvable"); return
+        }
+        let avant = FondEcranService.imageCourante(ecran: nsEcran)?.path ?? "(aucun)"
+        do {
+            try FondEcranService.appliquer(image: image, ecran: nsEcran)
+        } catch {
+            print("ECHEC application : \(error.localizedDescription)"); return
+        }
+        let fin = Date().addingTimeInterval(2.0)
+        while Date() < fin { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        let apres = FondEcranService.imageCourante(ecran: nsEcran)?.path ?? "(aucun)"
+        let ok = apres == image.path
+        print("  avant : \(avant)")
+        print("  apres : \(apres)")
+        print("  \(ok ? "OK   " : "ECHEC") application verifiee apres attente")
+        Journal.info("application verifiee \(ok ? "OK" : "ECHEC") : \(apres)")
+    }
+
     /// Exerce les deux chemins risques, avec restauration :
     /// applique une image sur le PREMIER ecran, verifie par relecture, remet le
     /// fond d'origine, puis teste la suppression sur une COPIE en dossier
@@ -216,7 +246,12 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
         controle("fond actuel lisible (ecran 1)", original != nil, original?.path ?? "aucun")
 
         let images = BibliothequeService.lister(dossier: dossier, tri: .nom)
-        guard let cible = images.first else { print("dossier vide"); return }
+        let cheminCourant = FondEcranService.imageCourante(ecran: nsEcran)?.path
+        // Appliquer ce qui est deja applique ne prouve rien :
+        // l'image d'essai doit differer du fond courant.
+        guard let cible = images.first(where: { $0.url.path != cheminCourant }) ?? images.first else {
+            print("dossier vide"); return
+        }
 
         do {
             try FondEcranService.appliquer(image: cible.url, ecran: nsEcran)
