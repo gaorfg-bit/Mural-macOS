@@ -246,7 +246,7 @@ struct PanneauLateral: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
-            Text("Cache des vignettes : \(VignettesService.dossierCache.path)")
+            Text("Thumbnail cache: \(VignettesService.nombreEnCache()) file(s) in \(VignettesService.dossierCache.path)")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }

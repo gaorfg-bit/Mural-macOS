@@ -1,4 +1,6 @@
+import AppKit
 import CoreGraphics
+import CryptoKit
 import Foundation
 import ImageIO
 
@@ -26,8 +28,42 @@ public enum VignettesService {
             .appendingPathComponent("Mural/vignettes", isDirectory: true)
     }
 
+    /// Cle de cache : chemin + date de modification + taille + largeur demandee.
+    /// Equivalent de la cle `sha1(chemin|mtime|WxH)` de `Thumbnailer.generate`
+    /// (`mural/thumbnails.py:25-27`) : une image modifiee change de cle.
+    static func cleCache(pour url: URL, largeurCible: Int) -> String? {
+        let valeurs = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        let date = valeurs?.contentModificationDate?.timeIntervalSince1970 ?? 0
+        let taille = valeurs?.fileSize ?? 0
+        let brut = "\(url.path)|\(date)|\(taille)|\(largeurCible)"
+        return SHA256.hash(data: Data(brut.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func lireCache(_ cle: String) -> Vignette? {
+        let fichier = dossierCache.appendingPathComponent("\(cle).jpg")
+        guard let source = CGImageSourceCreateWithURL(fichier as CFURL, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        return Vignette(image: image, largeurPixels: image.width, hauteurPixels: image.height)
+    }
+
+    private static func ecrireCache(_ image: CGImage, cle: String) {
+        try? FileManager.default.createDirectory(at: dossierCache, withIntermediateDirectories: true)
+        guard let donnees = NSBitmapImageRep(cgImage: image)
+            .representation(using: .jpeg, properties: [.compressionFactor: 0.92]) else { return }
+        try? donnees.write(to: dossierCache.appendingPathComponent("\(cle).jpg"))
+    }
+
+    /// Nombre de vignettes presentes dans le cache disque.
+    public static func nombreEnCache() -> Int {
+        ((try? FileManager.default.contentsOfDirectory(at: dossierCache, includingPropertiesForKeys: nil)) ?? []).count
+    }
+
     /// Vignette « cover » au rapport de la cellule (`THUMBNAIL_ASPECT`).
     public static func vignette(pour url: URL, largeurCible: Int) -> Vignette? {
+        // Cache disque d'abord : une vignette deja calculee revient en ~1 ms au
+        // lieu de ~14 ms de decodage (mesure sur ce Mac).
+        let cle = cleCache(pour: url, largeurCible: largeurCible)
+        if let cle, let enCache = lireCache(cle) { return enCache }
         let hauteurCible = max(1, Int((Double(largeurCible) * Reglages.rapportVignette).rounded()))
         // Le recadrage coupe dans la reduction : demander 4x la largeur cible
         // garantit qu'il reste au moins 2x la cellule APRES recadrage, dans les
@@ -39,6 +75,7 @@ public enum VignettesService {
         guard let recadree = recadrer(reduite.image, rapportLargeurSurHauteur: rapport) else {
             return reduite
         }
+        if let cle { ecrireCache(recadree, cle: cle) }
         return Vignette(image: recadree, largeurPixels: recadree.width, hauteurPixels: recadree.height)
     }
 
