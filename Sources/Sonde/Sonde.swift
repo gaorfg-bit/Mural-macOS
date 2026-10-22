@@ -41,7 +41,13 @@ func executer() {
         let connecteur = ecrans.first?.id ?? "ecran-1"
         for item in images.prefix(5) { reglages.ajouterAuDiaporama(item.url.path, ecran: connecteur) }
         var index: [String: Int] = [:]
-        print("DIAPORAMA (5 images en playlist, ecran \(connecteur))")
+        let playlist = reglages.playlistDiaporama(ecran: connecteur)
+        print("PLAYLIST construite (\(playlist.count)) :")
+        for (position, chemin) in playlist.enumerated() {
+            print("  [\(position)] \(URL(fileURLWithPath: chemin).lastPathComponent)")
+        }
+        reglages.diaporamaAleatoire = false
+        print("DIAPORAMA (ecran \(connecteur)) — aleatoire=\(reglages.diaporamaAleatoire)")
         for tour in 1...3 {
             let choix = DiaporamaService.prochaineAssignation(reglages: reglages, ecrans: ecrans, indexSequentiels: &index)
             print("  TICK \(tour) sequentiel : \(URL(fileURLWithPath: choix[connecteur] ?? "-").lastPathComponent)")
