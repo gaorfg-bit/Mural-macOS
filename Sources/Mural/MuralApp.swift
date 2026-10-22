@@ -113,10 +113,14 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
     /// Ecrit une vue AppKit dans un PNG (rendu hors ecran, sans permission).
     @MainActor
     private func ecrirePNG(_ vue: NSView, sortie: String, largeur: CGFloat, hauteur: CGFloat) {
-        let hosting = NSHostingView(rootView: AnyView(EmptyView()))
-        _ = hosting
+        // Un binaire hors bundle garde l'apparence systeme pour les controles
+        // mais dessine les fonds en clair : forcer les DEUX, sinon les libelles
+        // sont blancs sur blanc (piege deja paye).
+        let apparence = NSAppearance(named: ProcessInfo.processInfo.environment["MURAL_APPARENCE"] == "dark" ? .darkAqua : .aqua)
+        NSApplication.shared.appearance = apparence
         vue.frame = NSRect(x: 0, y: 0, width: largeur, height: hauteur)
         let fenetre = NSWindow(contentRect: vue.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        fenetre.appearance = apparence
         fenetre.contentView = vue
         fenetre.setFrame(vue.frame, display: false)
         let fin = Date().addingTimeInterval(12)

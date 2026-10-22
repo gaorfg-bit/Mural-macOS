@@ -6,9 +6,11 @@ Licence GPL-3.0 (oeuvre derivee) : voir `NOTICE.md`.
 ## Commandes
 
 ```bash
-swift build / swift test          # 0 erreur, 9 tests
+swift build / swift test          # 0 erreur, 13 tests
 make bundle / make run            # paquet Mural.app signe
-swift run sonde <dossier>         # mesures backend, sans interface
+swift run sonde <dossier>         # mesures backend (+ --diaporama : decision sans effet)
+swift run Mural --verifier <dossier>     # exerce les actions sans effet de bord
+swift run Mural --rendu-panneau <png> [dossier]
 make render DOSSIER=<chemin>      # rendu hors ecran de l'interface
 ```
 
