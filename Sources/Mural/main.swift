@@ -7,7 +7,13 @@ import MuralKit
 // verifie par l'outil `sonde` et par les tests. L'interface fidele (barre,
 // apercu, grille, barre d'etat, panneau 4 onglets) arrive a l'etape 4.
 
+@MainActor
 final class DelegueApplication: NSObject, NSApplicationDelegate {
+    /// Etat residant : l'application ne meurt pas avec sa fenetre, donc la
+    /// rotation peut continuer (equivalent du daemon systemd de GNOME).
+    private var elementBarreMenus: NSStatusItem?
+    private let diaporama = DiaporamaService()
+
     private var fenetre: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -54,6 +60,36 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
         fenetre.center()
         fenetre.makeKeyAndOrderFront(nil)
         self.fenetre = fenetre
+        installerBarreMenus()
+        if reglages.diaporamaActif { diaporama.demarrer(intervalleMinutes: reglages.diaporamaIntervalle) }
+    }
+
+    /// Icone de barre de menus : montre que le processus reste vivant.
+    private func installerBarreMenus() {
+        let element = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        element.button?.image = NSImage(systemSymbolName: "photo.on.rectangle", accessibilityDescription: "Mural")
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Show Mural", action: #selector(montrerFenetre), keyEquivalent: "")
+        menu.addItem(withTitle: "Next image now", action: #selector(imageSuivante), keyEquivalent: "")
+        menu.addItem(withTitle: "Start/Stop slideshow", action: #selector(basculerDiaporama), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit Mural", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        for item in menu.items { item.target = self }
+        element.menu = menu
+        elementBarreMenus = element
+    }
+
+    @objc private func montrerFenetre() { fenetre?.makeKeyAndOrderFront(nil) }
+
+    @objc private func imageSuivante() { diaporama.suivant() }
+
+    @objc private func basculerDiaporama() {
+        let reglages = ReglagesDepot.charger()
+        if diaporama.actif {
+            diaporama.arreter()
+        } else {
+            diaporama.demarrer(intervalleMinutes: reglages.diaporamaIntervalle)
+        }
     }
 
     /// Rend l'interface dans un PNG, hors ecran.
@@ -100,7 +136,7 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        false   // la rotation doit pouvoir survivre a la fermeture (etape 7)
+        false   // la rotation survit a la fermeture de la fenetre
     }
 }
 

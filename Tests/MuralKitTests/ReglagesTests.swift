@@ -120,3 +120,67 @@ final class DiaporamaTests: XCTestCase {
         XCTAssertEqual(ChoixDiaporama.suivant(playlist: [], aleatoire: true, index: &index), nil)
     }
 }
+
+
+final class DiaporamaServiceTests: XCTestCase {
+    private func ecran(_ nom: String) -> EcranInfo {
+        EcranInfo(id: nom, index: 0, nom: nom, largeur: 100, hauteur: 100, x: 0, y: 0, principal: true)
+    }
+
+    /// Un ecran sans favoris dedies ne recoit rien (pas de repli implicite).
+    func testEcranSansPlaylistNeJoueRien() {
+        var reglages = Reglages()
+        reglages.diaporamaImages = ["/tmp/interdit.png"]
+        var index: [String: Int] = [:]
+        let choix = DiaporamaService.prochaineAssignation(
+            reglages: reglages, ecrans: [ecran("A")], indexSequentiels: &index
+        )
+        XCTAssertTrue(choix.isEmpty)
+    }
+
+    /// Mode sequentiel : on avance dans la playlist, ecran par ecran.
+    func testDecisionSequentielleParEcran() throws {
+        let dossier = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mural-diapo-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dossier, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dossier) }
+        var chemins: [String] = []
+        for nom in ["a.png", "b.png"] {
+            let url = dossier.appendingPathComponent(nom)
+            try Data([0x89, 0x50]).write(to: url)
+            chemins.append(url.path)
+        }
+
+        var reglages = Reglages()
+        reglages.diaporamaAleatoire = false
+        for chemin in chemins { reglages.ajouterAuDiaporama(chemin, ecran: "A") }
+        var index: [String: Int] = [:]
+        let premier = DiaporamaService.prochaineAssignation(reglages: reglages, ecrans: [ecran("A")], indexSequentiels: &index)
+        let second = DiaporamaService.prochaineAssignation(reglages: reglages, ecrans: [ecran("A")], indexSequentiels: &index)
+        XCTAssertEqual(premier["A"], chemins[0])
+        XCTAssertEqual(second["A"], chemins[1])
+    }
+
+    /// Deux ecrans, deux playlists distinctes : chacun joue la sienne.
+    func testPlaylistsIndependantes() throws {
+        let dossier = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mural-diapo2-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dossier, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dossier) }
+        let a = dossier.appendingPathComponent("a.png")
+        let b = dossier.appendingPathComponent("b.png")
+        try Data([0x89, 0x50]).write(to: a)
+        try Data([0x89, 0x50]).write(to: b)
+
+        var reglages = Reglages()
+        reglages.diaporamaAleatoire = false
+        reglages.ajouterAuDiaporama(a.path, ecran: "A")
+        reglages.ajouterAuDiaporama(b.path, ecran: "B")
+        var index: [String: Int] = [:]
+        let choix = DiaporamaService.prochaineAssignation(
+            reglages: reglages, ecrans: [ecran("A"), ecran("B")], indexSequentiels: &index
+        )
+        XCTAssertEqual(choix["A"], a.path)
+        XCTAssertEqual(choix["B"], b.path)
+    }
+}

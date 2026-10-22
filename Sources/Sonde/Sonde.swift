@@ -35,6 +35,27 @@ func executer() {
     print("IMAGES : \(images.count)")
     print(String(format: "TEMPS ANALYSE : %.0f ms", duree))
 
+    // 3bis. Diaporama : verification de la decision, sans appliquer.
+    if arguments.contains("--diaporama"), !images.isEmpty {
+        var reglages = Reglages()
+        let connecteur = ecrans.first?.id ?? "ecran-1"
+        for item in images.prefix(5) { reglages.ajouterAuDiaporama(item.url.path, ecran: connecteur) }
+        var index: [String: Int] = [:]
+        print("DIAPORAMA (5 images en playlist, ecran \(connecteur))")
+        for tour in 1...3 {
+            let choix = DiaporamaService.prochaineAssignation(reglages: reglages, ecrans: ecrans, indexSequentiels: &index)
+            print("  TICK \(tour) sequentiel : \(URL(fileURLWithPath: choix[connecteur] ?? "-").lastPathComponent)")
+        }
+        reglages.diaporamaAleatoire = true
+        for tour in 1...3 {
+            let choix = DiaporamaService.prochaineAssignation(reglages: reglages, ecrans: ecrans, indexSequentiels: &index, tirage: { _ in tour - 1 })
+            print("  TICK \(tour) aleatoire  : \(URL(fileURLWithPath: choix[connecteur] ?? "-").lastPathComponent)")
+        }
+        let vide = Reglages()
+        let aucun = DiaporamaService.prochaineAssignation(reglages: vide, ecrans: ecrans, indexSequentiels: &index)
+        print("  PLAYLIST VIDE : \(aucun.isEmpty ? "rien applique (correct)" : "ERREUR")")
+    }
+
     // 4. Vignette et dimensions de la premiere image
     if let premier = images.first {
         var t0 = Date()
