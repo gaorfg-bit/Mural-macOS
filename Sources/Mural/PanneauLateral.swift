@@ -89,7 +89,7 @@ struct PanneauLateral: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "lock.slash")
-                Text("Lock screen: indisponible — macOS n'expose aucune API publique pour le fond de l'ecran verrouille. L'option GNOME existait mais n'etait jamais appliquee.")
+                Text("Lock screen: unavailable — macOS exposes no public API for the lock screen wallpaper. The GNOME option existed but was never applied.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
@@ -137,7 +137,7 @@ struct PanneauLateral: View {
             Text(playlist.isEmpty ? "No image selected" : "\(playlist.count) image\(playlist.count > 1 ? "s" : "") in list")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-            Text("Le diaporama est en mode 100 % manuel : seules les images ajoutees (menu contextuel de vignette) jouent.")
+            Text("The slideshow is 100 % manual: only images added from the thumbnail context menu are played.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
 
@@ -230,7 +230,7 @@ struct PanneauLateral: View {
     private var ongletAvif: some View {
         Group {
             SectionTitre("AVIF")
-            Text("AVIF reading: available natively (ImageIO decode l'AVIF sur macOS 13+). Les fichiers .avif s'affichent donc dans la galerie, sans ImageMagick.")
+            Text("AVIF reading: available natively (ImageIO decodes AVIF on macOS 13+), so .avif files appear in the gallery without ImageMagick.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Text(AvifService.resumeCapacites())
@@ -242,7 +242,7 @@ struct PanneauLateral: View {
                 Button("Purge") { modele.viderCache() }
             }
             if !AvifService.encodageDisponible {
-                Text("La conversion est desactivee : ImageIO n'expose pas d'encodeur AVIF sur ce systeme. Aucun bouton actif pour un comportement inexistant.")
+                Text("Conversion is disabled: ImageIO exposes no AVIF encoder on this system. No active button for behaviour that does not exist.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
