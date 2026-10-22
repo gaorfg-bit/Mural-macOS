@@ -49,6 +49,12 @@ make render DOSSIER=<chemin>      # rendu hors ecran de l'interface
   liste) avant de conclure. Trois faux diagnostics d'affilee venaient d'un
   harnais trompeur, pas du code.
 
+- **Le changement de fond est asynchrone** : `desktopImageURL(for:)` relu juste
+  apres `setDesktopImageURL` renvoie **l'ancienne** valeur. Laisser tourner la
+  boucle (~2 s) avant de relire, sinon on conclut a un echec qui n'existe pas.
+- **Un essai qui applique ce qui est deja applique ne prouve rien** : choisir une
+  image differente du fond courant.
+
 ## Interdits
 
 - **Ne jamais modifier, deplacer ni supprimer une image de l'utilisateur.**
