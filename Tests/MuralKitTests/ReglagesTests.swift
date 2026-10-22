@@ -161,6 +161,34 @@ final class DiaporamaServiceTests: XCTestCase {
         XCTAssertEqual(second["A"], chemins[1])
     }
 
+    /// L'ordre sequentiel doit etre exact sur 5 ticks, puis boucler.
+    /// C'est ce test qui manquait quand le mode sequentiel sautait des entrees.
+    func testOrdreSequentielSurCinqTicks() throws {
+        let dossier = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mural-ordre-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dossier, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dossier) }
+        var attendus: [String] = []
+        for nom in ["a.png", "b.png", "c.png"] {
+            let url = dossier.appendingPathComponent(nom)
+            try Data([0x89, 0x50]).write(to: url)
+            attendus.append(url.path)
+        }
+
+        var reglages = Reglages()
+        reglages.diaporamaAleatoire = false
+        for chemin in attendus { reglages.ajouterAuDiaporama(chemin, ecran: "A") }
+        var index: [String: Int] = [:]
+        var obtenus: [String] = []
+        for _ in 1...5 {
+            let choix = DiaporamaService.prochaineAssignation(
+                reglages: reglages, ecrans: [ecran("A")], indexSequentiels: &index
+            )
+            obtenus.append(choix["A"] ?? "-")
+        }
+        XCTAssertEqual(obtenus, [attendus[0], attendus[1], attendus[2], attendus[0], attendus[1]])
+    }
+
     /// Deux ecrans, deux playlists distinctes : chacun joue la sienne.
     func testPlaylistsIndependantes() throws {
         let dossier = FileManager.default.temporaryDirectory

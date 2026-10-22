@@ -35,15 +35,17 @@ public final class DiaporamaService {
         for connecteur in cibles {
             let playlist = reglages.playlistDiaporama(ecran: connecteur)
             guard !playlist.isEmpty else { continue }
-            var index = indexSequentiels[connecteur] ?? 0
-            let image = ChoixDiaporama.suivant(
-                playlist: playlist,
-                aleatoire: reglages.diaporamaAleatoire,
-                index: &index,
-                tirage: reglages.diaporamaAleatoire ? tirage?(playlist.count) : nil
-            )
-            indexSequentiels[connecteur] = index
-            if let image { choix[connecteur] = image }
+            if reglages.diaporamaAleatoire {
+                let position = tirage.map { tirageChoisi in tirageChoisi(playlist.count) % playlist.count }
+                    ?? Int.random(in: 0..<playlist.count)
+                choix[connecteur] = playlist[position]
+            } else {
+                // Avancement explicite : +1 par tick, jamais deux fois la meme
+                // image tant que la playlist n'est pas epuisee.
+                let position = (indexSequentiels[connecteur] ?? 0) % playlist.count
+                choix[connecteur] = playlist[position]
+                indexSequentiels[connecteur] = position + 1
+            }
         }
         return choix
     }
