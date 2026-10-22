@@ -140,8 +140,17 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
     }
 }
 
-let application = NSApplication.shared
-let delegue = DelegueApplication()
-application.delegate = delegue
-application.setActivationPolicy(.regular)
-application.run()
+// Point d'entree @main (et non du code de niveau superieur) : l'initialisation
+// de l'acteur principal est alors explicite, ce qui est exige par Swift 6
+// puisque DelegueApplication et DiaporamaService sont isoles a l'acteur principal.
+@main
+enum MuralApp {
+    @MainActor
+    static func main() {
+        let application = NSApplication.shared
+        let delegue = DelegueApplication()
+        application.delegate = delegue
+        application.setActivationPolicy(.regular)
+        application.run()
+    }
+}
