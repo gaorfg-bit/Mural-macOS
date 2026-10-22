@@ -22,7 +22,9 @@ public final class DiaporamaService {
     ///
     /// Aucun effet de bord : c'est ce qui rend la rotation verifiable sans
     /// modifier le fond d'ecran de l'utilisateur (`tick(simuler: true)`).
-    public static func prochaineAssignation(
+    /// `nonisolated` : la decision ne touche a rien, elle doit etre appelable
+    /// depuis les tests (et depuis n'importe quel fil).
+    public nonisolated static func prochaineAssignation(
         reglages: Reglages,
         ecrans: [EcranInfo],
         indexSequentiels: inout [String: Int],
