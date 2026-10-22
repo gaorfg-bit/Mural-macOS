@@ -1,0 +1,9 @@
+# Artefacts de compilation
+.build/
+*.app/
+
+# Rendus de verification (regenerables par `make render`)
+outils/rendu*.png
+
+# macOS
+.DS_Store
