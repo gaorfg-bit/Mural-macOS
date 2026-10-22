@@ -23,6 +23,14 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
         // la meme interface dans un bitmap, sans afficher de fenetre et sans
         // permission systeme (aucune capture d'ecran).
         let arguments = CommandLine.arguments
+        if let position = arguments.firstIndex(of: "--essayer-application") {
+            let dossier = arguments.count > position + 1
+                ? URL(fileURLWithPath: arguments[position + 1])
+                : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures")
+            essayerApplication(dossier: dossier)
+            NSApplication.shared.terminate(nil)
+            return
+        }
         if let position = arguments.firstIndex(of: "--verifier") {
             let dossier = arguments.count > position + 1
                 ? URL(fileURLWithPath: arguments[position + 1])
@@ -179,6 +187,64 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
 
         print("verifications : \(echecs) echec(s)")
         Journal.info("verifications des actions : \(echecs) echec(s)")
+    }
+
+    /// Exerce les deux chemins risques, avec restauration :
+    /// applique une image sur le PREMIER ecran, verifie par relecture, remet le
+    /// fond d'origine, puis teste la suppression sur une COPIE en dossier
+    /// temporaire. Aucune image de l'utilisateur n'est supprimee.
+    @MainActor
+    private func essayerApplication(dossier: URL) {
+        var echecs = 0
+        func controle(_ nom: String, _ ok: Bool, _ detail: String) {
+            if !ok { echecs += 1 }
+            print("  \(ok ? "OK   " : "ECHEC") \(nom) : \(detail)")
+            Journal.info("essai \(ok ? "OK" : "ECHEC") \(nom) : \(detail)")
+        }
+
+        let ecrans = EcransService.lister()
+        guard let premier = ecrans.first, let nsEcran = EcransService.nsEcran(index: premier.index) else {
+            print("aucun ecran"); return
+        }
+        let original = FondEcranService.imageCourante(ecran: nsEcran)
+        controle("fond actuel lisible (ecran 1)", original != nil, original?.path ?? "aucun")
+
+        let images = BibliothequeService.lister(dossier: dossier, tri: .nom)
+        guard let cible = images.first else { print("dossier vide"); return }
+
+        do {
+            try FondEcranService.appliquer(image: cible.url, ecran: nsEcran)
+            let relu = FondEcranService.imageCourante(ecran: nsEcran)?.path
+            controle("application sur l'ecran 1", relu == cible.url.path, relu ?? "nul")
+        } catch {
+            controle("application sur l'ecran 1", false, error.localizedDescription)
+        }
+
+        if let original {
+            do {
+                try FondEcranService.appliquer(image: original, ecran: nsEcran)
+                let relu = FondEcranService.imageCourante(ecran: nsEcran)?.path
+                controle("fond d'origine restaure", relu == original.path, relu ?? "nul")
+            } catch {
+                controle("fond d'origine restaure", false, error.localizedDescription)
+            }
+        }
+
+        // Suppression : sur une COPIE, jamais sur les images de l'utilisateur.
+        let temporaire = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mural-essai-suppression", isDirectory: true)
+        try? FileManager.default.createDirectory(at: temporaire, withIntermediateDirectories: true)
+        let copie = temporaire.appendingPathComponent(cible.url.lastPathComponent)
+        try? FileManager.default.removeItem(at: copie)
+        try? FileManager.default.copyItem(at: cible.url, to: copie)
+        controle("copie creee pour l'essai", FileManager.default.fileExists(atPath: copie.path), copie.path)
+        try? FileManager.default.removeItem(at: copie)
+        controle("suppression de la copie", !FileManager.default.fileExists(atPath: copie.path), "copie supprimee")
+        controle("image d'origine intacte", FileManager.default.fileExists(atPath: cible.url.path), cible.url.lastPathComponent)
+        try? FileManager.default.removeItem(at: temporaire)
+
+        print("essais : \(echecs) echec(s)")
+        Journal.info("essais d'application et de suppression : \(echecs) echec(s)")
     }
 
     /// Rend l'interface dans un PNG, hors ecran.
