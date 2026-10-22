@@ -206,6 +206,12 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
         guard let premier = ecrans.first, let nsEcran = EcransService.nsEcran(index: premier.index) else {
             print("aucun ecran"); return
         }
+        // macOS applique le changement de fond de facon asynchrone : relire
+        // immediatement renvoie l'ancienne valeur. On laisse tourner la boucle.
+        func attendre(_ secondes: TimeInterval) {
+            let fin = Date().addingTimeInterval(secondes)
+            while Date() < fin { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        }
         let original = FondEcranService.imageCourante(ecran: nsEcran)
         controle("fond actuel lisible (ecran 1)", original != nil, original?.path ?? "aucun")
 
@@ -214,6 +220,7 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
 
         do {
             try FondEcranService.appliquer(image: cible.url, ecran: nsEcran)
+            attendre(2.0)
             let relu = FondEcranService.imageCourante(ecran: nsEcran)?.path
             controle("application sur l'ecran 1", relu == cible.url.path, relu ?? "nul")
         } catch {
@@ -223,6 +230,7 @@ final class DelegueApplication: NSObject, NSApplicationDelegate {
         if let original {
             do {
                 try FondEcranService.appliquer(image: original, ecran: nsEcran)
+                attendre(2.0)
                 let relu = FondEcranService.imageCourante(ecran: nsEcran)?.path
                 controle("fond d'origine restaure", relu == original.path, relu ?? "nul")
             } catch {
