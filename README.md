@@ -13,6 +13,17 @@
 
 <h1>Install</h2>
 
+<p><strong>Homebrew</strong></p>
+
+<pre><code>brew install --cask gaorfg-bit/mural/mural-macos</code></pre>
+
+<p><em>Apple silicon, macOS 13 or later. The 0.1.0 build is not notarized yet: on first
+launch, right-click Mural in Applications and choose <strong>Open</strong>, or run
+<code>xattr -dr com.apple.quarantine "/Applications/Mural.app"</code>. Add
+<code>--no-quarantine</code> to skip the prompt at install time.</em></p>
+
+<p><strong>Build from source</strong></p>
+
 <p><strong>Step 1 — Install dependencies</strong></p>
 
 <pre><code>xcode-select --install
@@ -25,14 +36,13 @@ cd Mural-macOS
 make bundle OFFLINE= SIGN=-
 open Mural.app</code></pre>
 
-<p><em>Mural is distributed as source for now: there is no public download yet, and the local
-bundle is ad-hoc signed, not notarized. <code>OFFLINE=</code> lets Cargo fetch its dependencies
-on a fresh machine; <code>SIGN=-</code> uses an ad-hoc signature when no local signing identity
-is installed.</em></p>
+<p><em><code>OFFLINE=</code> lets Cargo fetch its dependencies on a fresh machine;
+<code>SIGN=-</code> uses an ad-hoc signature when no local signing identity is installed.</em></p>
 
 <p><strong>Uninstall:</strong></p>
 
-<pre><code>rm -rf Mural.app</code></pre>
+<pre><code>brew uninstall --cask mural-macos
+rm -rf Mural.app   # source build only</code></pre>
 
 <hr>
 
