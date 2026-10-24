@@ -14,7 +14,7 @@
 //! declenche.
 
 use objc2_foundation::NSObjectNSDelayedPerforming;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
@@ -86,12 +86,46 @@ pub struct Etat {
     pub hauteur: f64,
 }
 
+/// Donnees possedees du panneau : aucune reference vers l'etat vivant ne
+/// traverse la construction ou l'actualisation des controles AppKit.
+#[derive(Clone)]
+pub(crate) struct InstantaneReglages {
+    pub reglages: crate::preferences::Reglages,
+    pub ecrans: Vec<ecrans::Ecran>,
+    pub ecran_courant: usize,
+    pub dossier: PathBuf,
+    pub tri: Tri,
+    pub diaporama_actif: bool,
+    pub filtre_diaporama: bool,
+    pub plan_vide: bool,
+}
+impl InstantaneReglages {
+    pub fn cle_ecran_courant(&self) -> Option<&str> {
+        self.ecrans.get(self.ecran_courant).map(|e| e.cle.as_str())
+    }
+}
+
 impl Etat {
+    fn instantane_reglages(&self) -> InstantaneReglages {
+        InstantaneReglages {
+            reglages: self.reglages.clone(), ecrans: self.ecrans.clone(),
+            ecran_courant: self.ecran_courant, dossier: self.dossier.clone(), tri: self.tri,
+            diaporama_actif: self.diaporama_actif, filtre_diaporama: self.filtre_diaporama,
+            plan_vide: self.plan_diaporama().is_empty(),
+        }
+    }
     fn nouveau(dossier: PathBuf, cible: usize, chargement_integral: bool) -> Self {
         // Les anciens identifiants Swift (`nom@x,y`) ne sont remappes que vers
         // les ecrans reellement connectes, avec une correspondance exacte.
         let ecrans = ecrans::lister();
-        let reglages = crate::preferences::charger_avec_ecrans(&ecrans);
+        let (reglages, erreur_chargement) = match crate::preferences::essayer_charger_avec_ecrans(&ecrans) {
+            Ok(reglages) => (reglages, None),
+            Err(erreur) => {
+                let message = format!("Settings could not be read: {erreur}. Original file preserved.");
+                journal::erreur(&message);
+                (crate::preferences::Reglages::default(), Some(message))
+            }
+        };
         let mut etat = Etat {
             tri: if reglages.tri == "date" {
                 Tri::Date
@@ -101,7 +135,7 @@ impl Etat {
             largeur: taille_valide(reglages.largeur_fenetre, 880.0, 2400.0, 1180.0),
             hauteur: taille_valide(reglages.hauteur_fenetre, 520.0, 1600.0, 760.0),
             reglages,
-            erreur_sauvegarde: None,
+            erreur_sauvegarde: erreur_chargement,
             diaporama_actif: false,
             filtre_diaporama: false,
             cible,
@@ -503,29 +537,32 @@ pub struct CibleIvars {
     avif_panneau: RefCell<Option<panneau_avif::Panneau>>,
     avif_tache: RefCell<Option<panneau_avif::Tache>>,
     avif_sources: RefCell<Vec<PathBuf>>,
-    etat: *mut Etat,
+    // Etat alloue separement et conserve jusqu'a la fin du processus.
+    // Cell autorise uniquement le branchement du pointeur, pas un emprunt long.
+    etat: Cell<*mut Etat>,
+    generation_grille: Cell<u64>,
     surface: RefCell<Option<Retained<interface::Racine>>>,
     details: RefCell<Option<Retained<NSView>>>,
-    apercu: *mut NSImageView,
-    etat_texte: *mut NSTextField,
-    nom_fichier: *mut NSTextField,
-    dimensions: *mut NSTextField,
-    bouton_appliquer: *mut NSButton,
-    document: *mut NSView,
-    defilement: *mut NSScrollView,
-    recherche: *mut NSSearchField,
+    apercu: Cell<*mut NSImageView>,
+    etat_texte: Cell<*mut NSTextField>,
+    nom_fichier: Cell<*mut NSTextField>,
+    dimensions: Cell<*mut NSTextField>,
+    bouton_appliquer: Cell<*mut NSButton>,
+    document: Cell<*mut NSView>,
+    defilement: Cell<*mut NSScrollView>,
+    recherche: Cell<*mut NSSearchField>,
     menu: RefCell<Option<Retained<NSMenu>>>,
-    segments: *mut NSSegmentedControl,
-    fenetre: *mut NSWindow,
-    favori: *mut NSButton,
-    bouton_diaporama: *mut NSButton,
-    bouton_suivante: *mut NSButton,
+    segments: Cell<*mut NSSegmentedControl>,
+    fenetre: Cell<*mut NSWindow>,
+    favori: Cell<*mut NSButton>,
+    bouton_diaporama: Cell<*mut NSButton>,
+    bouton_suivante: Cell<*mut NSButton>,
     apercu_plein: RefCell<Option<Retained<NSWindow>>>,
     minuterie: RefCell<Option<Retained<objc2_foundation::NSTimer>>>,
     suivi: RefCell<suivi::Suivi>,
     bilan: RefCell<suivi::Bilan>,
     relecture: RefCell<Option<Retained<objc2_foundation::NSTimer>>>,
-    panneau: RefCell<Option<Panneau>>,
+    panneau: RefCell<Option<std::rc::Rc<Panneau>>>,
 }
 
 define_class!(
@@ -539,7 +576,7 @@ define_class!(
     unsafe impl NSApplicationDelegate for Cible {
         #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
         fn rouvrir(&self, _application: &NSApplication, _visible: bool) -> bool {
-            if !self.ivars().fenetre.is_null() { unsafe { &*self.ivars().fenetre }.makeKeyAndOrderFront(None); }
+            if !self.ivars().fenetre.get().is_null() { unsafe { &*self.ivars().fenetre.get() }.makeKeyAndOrderFront(None); }
             true
         }
         #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
@@ -557,7 +594,8 @@ define_class!(
             let panneau = panneau.as_ref().unwrap();
             if self.ivars().avif_tache.borrow().is_none() {
                 let chemins = self.candidats_avif();
-                panneau.preparer(&unsafe { &*self.ivars().etat }.dossier, chemins.len());
+                let dossier = unsafe { &*self.ivars().etat.get() }.dossier.clone();
+                panneau.preparer(&dossier, chemins.len());
                 *self.ivars().avif_sources.borrow_mut() = chemins;
             }
             panneau.fenetre.makeKeyAndOrderFront(None);
@@ -612,23 +650,19 @@ define_class!(
         /// cree aucun doublon.
         #[unsafe(method(ouvrirReglages:))]
         fn ouvrir_reglages(&self, _expediteur: &NSObject) {
-            if self.ivars().etat.is_null() {
+            if self.ivars().etat.get().is_null() {
                 return;
             }
             let mtm = MainThreadMarker::new().expect("settings on main thread");
-            {
-                let mut panneau = self.ivars().panneau.borrow_mut();
-                if panneau.is_none() {
-                    *panneau = Some(Panneau::nouveau(
-                        mtm,
-                        self,
-                        unsafe { &*self.ivars().etat },
-                    ));
-                }
-            }
-            let panneau = self.ivars().panneau.borrow();
-            let Some(panneau) = panneau.as_ref() else { return; };
-            panneau.actualiser(unsafe { &*self.ivars().etat });
+            let panneau = self.ivars().panneau.borrow().clone();
+            let panneau = panneau.unwrap_or_else(|| {
+                let panneau = std::rc::Rc::new(Panneau::nouveau(mtm, self));
+                *self.ivars().panneau.borrow_mut() = Some(panneau.clone());
+                panneau
+            });
+            // Publier la fenetre avant les menus, dont les notifications sont synchrones.
+            let etat = unsafe { &*self.ivars().etat.get() }.instantane_reglages();
+            panneau.actualiser(&etat);
             panneau.fenetre.makeKeyAndOrderFront(None);
         }
 
@@ -641,7 +675,7 @@ define_class!(
                 .panneau
                 .borrow()
                 .as_ref()
-                .map(Panneau::instantane)
+                .map(|p| p.instantane())
                 .unwrap_or_else(|| "null".to_string());
             Retained::into_raw(NSString::from_str(&texte))
         }
@@ -656,7 +690,7 @@ define_class!(
             else {
                 return;
             };
-            let index = unsafe { &*self.ivars().etat }
+            let index = unsafe { &*self.ivars().etat.get() }
                 .ecrans
                 .iter()
                 .position(|e| e.cle == cle);
@@ -707,9 +741,9 @@ define_class!(
                 journal::erreur("panneau : controle de dossier obsolete ignore");
                 return;
             };
-            let dossier = unsafe { &*self.ivars().etat }.dossier.clone();
+            let dossier = unsafe { &*self.ivars().etat.get() }.dossier.clone();
             {
-                let etat = unsafe { &mut *self.ivars().etat };
+                let etat = unsafe { &mut *self.ivars().etat.get() };
                 etat.reglages
                     .dossier_par_ecran
                     .insert(cle.clone(), dossier.to_string_lossy().into_owned());
@@ -727,7 +761,7 @@ define_class!(
         fn favori_panneau(&self, _expediteur: &NSPopUpButton) {
             let chemin = {
                 let panneau = self.ivars().panneau.borrow();
-                panneau.as_ref().and_then(Panneau::favori_selectionne)
+                panneau.as_ref().and_then(|p| p.favori_selectionne())
             };
             if let Some(chemin) = chemin {
                 self.ouvrir_favori_chemin(PathBuf::from(chemin));
@@ -739,7 +773,7 @@ define_class!(
         fn retirer_favori_panneau(&self, _expediteur: &NSButton) {
             let chemin = {
                 let panneau = self.ivars().panneau.borrow();
-                panneau.as_ref().and_then(Panneau::favori_selectionne)
+                panneau.as_ref().and_then(|p| p.favori_selectionne())
             };
             if let Some(chemin) = chemin {
                 self.retirer_favori_chemin(std::path::Path::new(&chemin));
@@ -749,9 +783,9 @@ define_class!(
         #[unsafe(method(imageDiaporama:))]
         fn image_diaporama(&self, expediteur: &NSObject) {
             let Some(chemin) = self.chemin_action(expediteur) else { return; };
-            let cle = unsafe { &*self.ivars().etat }.cle_ecran_courant().map(str::to_owned);
+            let cle = unsafe { &*self.ivars().etat.get() }.cle_ecran_courant().map(str::to_owned);
             {
-                let etat = unsafe { &mut *self.ivars().etat };
+                let etat = unsafe { &mut *self.ivars().etat.get() };
                 let chemin = chemin.to_string_lossy().into_owned();
                 etat.reglages.basculer_favori(&chemin, cle.as_deref());
                 etat.enregistrer();
@@ -761,9 +795,9 @@ define_class!(
 
         #[unsafe(method(ajouterDossierDiaporama:))]
         fn ajouter_dossier_diaporama(&self, _expediteur: &NSObject) {
-            let cle = unsafe { &*self.ivars().etat }.cle_ecran_courant().map(str::to_owned);
+            let cle = unsafe { &*self.ivars().etat.get() }.cle_ecran_courant().map(str::to_owned);
             {
-                let etat = unsafe { &mut *self.ivars().etat };
+                let etat = unsafe { &mut *self.ivars().etat.get() };
                 for image in &etat.images {
                     let chemin = image.chemin.to_string_lossy().into_owned();
                     etat.reglages.ajouter_favori(&chemin, cle.as_deref());
@@ -775,9 +809,9 @@ define_class!(
 
         #[unsafe(method(retirerDossierDiaporama:))]
         fn retirer_dossier_diaporama(&self, _expediteur: &NSObject) {
-            let cle = unsafe { &*self.ivars().etat }.cle_ecran_courant().map(str::to_owned);
+            let cle = unsafe { &*self.ivars().etat.get() }.cle_ecran_courant().map(str::to_owned);
             {
-                let etat = unsafe { &mut *self.ivars().etat };
+                let etat = unsafe { &mut *self.ivars().etat.get() };
                 let dossier = etat.dossier.clone();
                 etat.reglages.retirer_dossier_favori(&dossier, cle.as_deref());
                 etat.enregistrer();
@@ -787,7 +821,7 @@ define_class!(
 
         #[unsafe(method(filtrerDiaporama:))]
         fn filtrer_diaporama(&self, _expediteur: &NSObject) {
-            let etat = unsafe { &mut *self.ivars().etat };
+            let etat = unsafe { &mut *self.ivars().etat.get() };
             etat.filtre_diaporama = !etat.filtre_diaporama;
             self.rafraichir_grille(); self.rafraichir_selection();
             self.rafraichir_panneau();
@@ -795,10 +829,10 @@ define_class!(
 
         #[unsafe(method(basculerDiaporama:))]
         fn basculer_diaporama(&self, _expediteur: &NSObject) {
-            if unsafe { &*self.ivars().etat }.diaporama_actif {
+            if unsafe { &*self.ivars().etat.get() }.diaporama_actif {
                 self.arreter_diaporama(); self.rafraichir(); self.message("Slideshow paused");
             } else {
-                if unsafe { &*self.ivars().etat }.plan_diaporama().is_empty() {
+                if unsafe { &*self.ivars().etat.get() }.plan_diaporama().is_empty() {
                     self.message("Choose at least one image and one display for the slideshow"); return;
                 }
                 self.programmer_diaporama(); self.rafraichir();
@@ -813,7 +847,7 @@ define_class!(
 
         #[unsafe(method(aleatoireDiaporama:))]
         fn aleatoire_diaporama(&self, _expediteur: &NSObject) {
-            let etat = unsafe { &mut *self.ivars().etat };
+            let etat = unsafe { &mut *self.ivars().etat.get() };
             etat.reglages.diaporama_aleatoire = !etat.reglages.diaporama_aleatoire;
             etat.enregistrer(); self.rafraichir();
         }
@@ -836,11 +870,11 @@ define_class!(
 
         #[unsafe(method(afficherFenetre:))]
         fn afficher_fenetre(&self, _expediteur: &NSObject) {
-            if !self.ivars().fenetre.is_null() { unsafe { &*self.ivars().fenetre }.makeKeyAndOrderFront(None); }
+            if !self.ivars().fenetre.get().is_null() { unsafe { &*self.ivars().fenetre.get() }.makeKeyAndOrderFront(None); }
         }
         #[unsafe(method(enregistrerEtat:))]
         fn enregistrer_etat(&self, notification: &objc2_foundation::NSNotification) {
-            if !self.ivars().etat.is_null() { unsafe { &mut *self.ivars().etat }.enregistrer(); }
+            if !self.ivars().etat.get().is_null() { unsafe { &mut *self.ivars().etat.get() }.enregistrer(); }
             if &*notification.name() == unsafe { objc2_app_kit::NSApplicationWillTerminateNotification } { self.arreter_diaporama(); self.arreter_relecture(); }
             if &*notification.name() == unsafe { objc2_app_kit::NSWindowWillCloseNotification } {
                 if let Some(fenetre) = self.ivars().apercu_plein.borrow_mut().take() { fenetre.close(); }
@@ -851,7 +885,7 @@ define_class!(
         #[unsafe(method(dossierFavori:))]
         fn dossier_favori(&self, _expediteur: &NSObject) {
             {
-                let etat = unsafe { &mut *self.ivars().etat };
+                let etat = unsafe { &mut *self.ivars().etat.get() };
                 etat.reglages.basculer_dossier_favori(&etat.dossier);
                 etat.enregistrer();
             }
@@ -881,7 +915,7 @@ define_class!(
         #[unsafe(method(memeImagePartout:))]
         fn meme_image_partout(&self, _expediteur: &NSObject) {
             {
-                let etat = unsafe { &mut *self.ivars().etat };
+                let etat = unsafe { &mut *self.ivars().etat.get() };
                 etat.reglages.meme_image_partout = !etat.reglages.meme_image_partout;
                 etat.enregistrer();
             }
@@ -893,7 +927,7 @@ define_class!(
         #[unsafe(method(selectionIndependante:))]
         fn selection_independante(&self, _expediteur: &NSObject) {
             {
-                let etat = unsafe { &mut *self.ivars().etat };
+                let etat = unsafe { &mut *self.ivars().etat.get() };
                 etat.reglages.selection_independante = !etat.reglages.selection_independante;
                 etat.enregistrer();
             }
@@ -922,7 +956,7 @@ define_class!(
         fn apercu_plein_ecran(&self, expediteur: &NSObject) {
             let Some(chemin) = self.chemin_action(expediteur) else { return; };
             let Some(mtm) = MainThreadMarker::new() else { return; };
-            let principale = unsafe { &*self.ivars().fenetre };
+            let principale = unsafe { &*self.ivars().fenetre.get() };
             let Some(ecran) = principale.screen() else { return; };
             let cadre = ecran.frame();
             let echelle = ecran.backingScaleFactor();
@@ -945,43 +979,49 @@ define_class!(
         #[unsafe(method(ecransModifies:))]
         fn ecrans_modifies(&self, _notification: &objc2_foundation::NSNotification) {
             let ivars = self.ivars();
-            if ivars.etat.is_null() || ivars.segments.is_null() { return; }
-            let etat = unsafe { &mut *ivars.etat };
-            let id = etat.ecrans.get(etat.ecran_courant).map(|e| e.identifiant);
-            etat.ecrans = ecrans::lister();
-            etat.ecran_courant = etat.ecrans.iter().position(|e| Some(e.identifiant) == id).unwrap_or(0);
-            let segments = unsafe { &*ivars.segments };
-            segments.setSegmentCount(etat.ecrans.len() as isize);
-            for (index, ecran) in etat.ecrans.iter().enumerate() {
+            if ivars.etat.get().is_null() || ivars.segments.get().is_null() { return; }
+            let ecrans = ecrans::lister();
+            let (ecrans, courant, arreter, dossier) = {
+                let etat = unsafe { &mut *ivars.etat.get() };
+                let id = etat.ecrans.get(etat.ecran_courant).map(|e| e.identifiant);
+                etat.ecrans = ecrans;
+                etat.ecran_courant = etat.ecrans.iter().position(|e| Some(e.identifiant) == id).unwrap_or(0);
+                let dossier = etat.ecrans.get(etat.ecran_courant)
+                    .and_then(|e| etat.reglages.dossier_ecran(&e.cle))
+                    .filter(|d| *d != etat.dossier);
+                (etat.ecrans.clone(), etat.ecran_courant,
+                    etat.diaporama_actif && etat.plan_diaporama().is_empty(), dossier)
+            };
+            let segments = unsafe { &*ivars.segments.get() };
+            segments.setSegmentCount(ecrans.len() as isize);
+            for (index, ecran) in ecrans.iter().enumerate() {
                 segments.setLabel_forSegment(&NSString::from_str(&format!("Display {}", index + 1)), index as isize);
                 segments.setToolTip_forSegment(Some(&NSString::from_str(&ecran.nom)), index as isize);
             }
-            segments.setSelectedSegment(if etat.ecrans.is_empty() { -1 } else { etat.ecran_courant as isize });
+            segments.setSelectedSegment(if ecrans.is_empty() { -1 } else { courant as isize });
             let mut cadre = segments.frame();
             cadre.size.width = 168.0;
             cadre.origin.x = 164.0;
             segments.setFrame(cadre);
-            etat.relever_fonds_actifs();
-            if etat.plan_diaporama().is_empty() && etat.diaporama_actif { self.arreter_diaporama(); }
-            journal::info(&format!("configuration actualisee : {} ecran(s), selection {}", etat.ecrans.len(), etat.ecran_courant + 1));
-            if let Some(dossier) = etat.ecrans.get(etat.ecran_courant).and_then(|e| etat.reglages.dossier_ecran(&e.cle)) {
-                if dossier != etat.dossier { self.charger_dossier(dossier); return; }
-            }
+            self.relever_fonds_actifs();
+            if arreter { self.arreter_diaporama(); }
+            journal::info(&format!("configuration actualisee : {} ecran(s), selection {}", ecrans.len(), courant + 1));
+            if let Some(dossier) = dossier { self.charger_dossier(dossier); return; }
             self.rafraichir();
         }
 
         #[unsafe(method(fenetreRedimensionnee:))]
         fn fenetre_redimensionnee(&self, _notification: &objc2_foundation::NSNotification) {
             let ivars = self.ivars();
-            if ivars.etat.is_null() || ivars.defilement.is_null() { return; }
-            let etat = unsafe { &mut *ivars.etat };
-            let defilement = unsafe { &*ivars.defilement };
-            etat.largeur = defilement.frame().size.width;
-            if !ivars.fenetre.is_null() {
-                if let Some(contenu) = unsafe { &*ivars.fenetre }.contentView() {
-                    etat.hauteur = contenu.bounds().size.height;
-
-                }
+            if ivars.etat.get().is_null() || ivars.defilement.get().is_null() { return; }
+            let largeur = unsafe { &*ivars.defilement.get() }.frame().size.width;
+            let hauteur = if !ivars.fenetre.get().is_null() {
+                unsafe { &*ivars.fenetre.get() }.contentView().map(|c| c.bounds().size.height)
+            } else { None };
+            {
+                let etat = unsafe { &mut *ivars.etat.get() };
+                etat.largeur = largeur;
+                if let Some(hauteur) = hauteur { etat.hauteur = hauteur; }
             }
             // Regrouper les notifications du redimensionnement avant de recréer les boutons.
             unsafe {
@@ -1002,10 +1042,10 @@ define_class!(
         #[unsafe(method(ciblerRecherche:))]
         fn cibler_recherche(&self, _expediteur: Option<&NSObject>) {
             let ivars = self.ivars();
-            if ivars.recherche.is_null() || ivars.fenetre.is_null() { return; }
+            if ivars.recherche.get().is_null() || ivars.fenetre.get().is_null() { return; }
             if let Some(surface) = ivars.surface.borrow().as_ref() { surface.reveler(); }
-            let champ = unsafe { &*ivars.recherche };
-            unsafe { &*ivars.fenetre }.makeKeyAndOrderFront(None);
+            let champ = unsafe { &*ivars.recherche.get() };
+            unsafe { &*ivars.fenetre.get() }.makeKeyAndOrderFront(None);
             unsafe { champ.selectText(None); }
         }
 
@@ -1032,32 +1072,44 @@ define_class!(
 
         #[unsafe(method(vignettesPretes:))]
         fn vignettes_pretes(&self, _objet: Option<&NSObject>) {
-            {
-                let etat = unsafe { &mut *self.ivars().etat };
-                if let Some(reception) = &etat.reception {
-                    while let Ok((index, vignette)) = reception.try_recv() {
-                        etat.vignettes_en_attente[index] = false;
-                        etat.vignettes[index] = vignette.map(|v| NSImage::initWithCGImage_size(NSImage::alloc(), &v.image, NSSize { width: v.largeur as f64, height: v.hauteur as f64 }));
-                    }
+            let pretes = {
+                let etat = unsafe { &*self.ivars().etat.get() };
+                etat.reception.as_ref().map(|reception| reception.try_iter()
+                    .filter_map(|(index, vignette)| etat.images.get(index)
+                        .map(|image| (index, image.chemin.clone(), vignette)))
+                    .collect::<Vec<_>>()).unwrap_or_default()
+            };
+            for (index, chemin, vignette) in pretes {
+                let image = vignette.map(|v| NSImage::initWithCGImage_size(NSImage::alloc(),
+                    &v.image, NSSize { width: v.largeur as f64, height: v.hauteur as f64 }));
+                let etat = unsafe { &mut *self.ivars().etat.get() };
+                if etat.images.get(index).is_some_and(|i| i.chemin == chemin) {
+                    etat.vignettes_en_attente[index] = false;
+                    etat.vignettes[index] = image;
                 }
             }
-            // Les boutons restent en place : pas de reconstruction de toute
-            // la grille a chaque vignette et pas de perte de selection.
-            let etat = unsafe { &*self.ivars().etat };
-            for (&adresse, &index) in &etat.cellules {
-                let bouton = unsafe { &*(adresse as *const NSButton) };
-                bouton.setImage(etat.vignettes[index].as_deref());
+            let (cellules, statut) = {
+                let etat = unsafe { &*self.ivars().etat.get() };
+                let cellules = etat.cellules.iter().map(|(&adresse, &index)| (
+                    unsafe { &*(adresse as *const NSButton) }.retain(),
+                    etat.vignettes[index].clone(), etat.vignettes_en_attente[index],
+                )).collect::<Vec<_>>();
+                (cellules, etat.statut_bibliotheque())
+            };
+            // Les boutons sont retenus par cet instantane pendant les callbacks.
+            for (bouton, image, en_attente) in cellules {
+                bouton.setImage(image.as_deref());
                 bouton.setImageScaling(NSImageScaling::ScaleAxesIndependently);
-                bouton.setTitle(&NSString::from_str(if etat.vignettes[index].is_some() { "" } else if etat.vignettes_en_attente[index] { "…" } else { "(unreadable)" }));
+                bouton.setTitle(&NSString::from_str(if image.is_some() { "" } else if en_attente { "…" } else { "(unreadable)" }));
             }
-            unsafe { &*self.ivars().etat_texte }.setStringValue(&NSString::from_str(&etat.statut_bibliotheque()));
+            unsafe { &*self.ivars().etat_texte.get() }.setStringValue(&NSString::from_str(&statut));
         }
 
         /// Clic sur une vignette : selection, apercu, informations.
         #[unsafe(method(celluleCliquee:))]
         fn cellule_cliquee(&self, expediteur: &NSButton) {
             let ivars = self.ivars();
-            let etat = unsafe { &mut *ivars.etat };
+            let etat = unsafe { &mut *ivars.etat.get() };
             let cle = expediteur as *const NSButton as usize;
             let Some(&index) = etat.cellules.get(&cle) else {
                 journal::erreur("clic sur une cellule inconnue (carte vide)");
@@ -1073,13 +1125,14 @@ define_class!(
         fn appliquer(&self, expediteur: &NSObject) {
             if self.chemin_action(expediteur).is_none() { return; }
             let ivars = self.ivars();
-            let etat = unsafe { &mut *ivars.etat };
-            let Some(index) = etat.selection else {
-                journal::erreur("appliquer sans image selectionnee");
-                return;
+            let (chemin, cible, cibles, nom) = {
+                let etat = unsafe { &*ivars.etat.get() };
+                let Some(image) = etat.selection.and_then(|i| etat.images.get(i)) else {
+                    journal::erreur("appliquer sans image selectionnee"); return;
+                };
+                (image.chemin.clone(), etat.ecran_courant,
+                    etat.cibles_application().into_iter().cloned().collect::<Vec<_>>(), image.nom.clone())
             };
-            let chemin = etat.images[index].chemin.clone();
-            let cible = etat.ecran_courant;
             journal::info(&format!(
                 "application de « {} » sur l'ecran {}",
                 chemin.display(),
@@ -1087,7 +1140,6 @@ define_class!(
             ));
             let mut appliques = 0usize;
             let mut erreurs = Vec::new();
-            let cibles: Vec<_> = etat.cibles_application().into_iter().cloned().collect();
             if cibles.is_empty() { journal::erreur("aucun ecran disponible"); return; }
             for e in cibles {
                 let sequence = self.enregistrer_intention(&e.cle, &chemin);
@@ -1121,8 +1173,8 @@ define_class!(
                     }
                 }
             }
-            etat.enregistrer();
-            etat.relever_fonds_actifs();
+            unsafe { &mut *ivars.etat.get() }.enregistrer();
+            self.relever_fonds_actifs();
             self.rafraichir();
             if self.ivars().suivi.borrow().est_vide() {
                 self.arreter_relecture();
@@ -1132,7 +1184,7 @@ define_class!(
             } else if erreurs.is_empty() {
                 self.message(&format!(
                     "Request accepted on {appliques} display(s), checking: {}",
-                    etat.images[index].nom
+                    nom
                 ));
             } else {
                 self.message(&format!(
@@ -1177,7 +1229,7 @@ define_class!(
         #[unsafe(method(actualiser:))]
         fn actualiser(&self, _expediteur: &NSObject) {
             let ivars = self.ivars();
-            let etat = unsafe { &mut *ivars.etat };
+            let etat = unsafe { &mut *ivars.etat.get() };
             let dossier = etat.dossier.clone();
             journal::info("commande : actualiser");
             self.charger_dossier(dossier);
@@ -1187,7 +1239,7 @@ define_class!(
         #[unsafe(method(trierNom:))]
         fn trier_nom(&self, _expediteur: &NSObject) {
             let ivars = self.ivars();
-            let etat = unsafe { &mut *ivars.etat };
+            let etat = unsafe { &mut *ivars.etat.get() };
             etat.tri = Tri::Nom;
             let dossier = etat.dossier.clone();
             journal::info("commande : tri par nom");
@@ -1198,7 +1250,7 @@ define_class!(
         #[unsafe(method(trierDate:))]
         fn trier_date(&self, _expediteur: &NSObject) {
             let ivars = self.ivars();
-            let etat = unsafe { &mut *ivars.etat };
+            let etat = unsafe { &mut *ivars.etat.get() };
             etat.tri = Tri::Date;
             let dossier = etat.dossier.clone();
             journal::info("commande : tri par date");
@@ -1209,8 +1261,8 @@ define_class!(
         #[unsafe(method(rechercher:))]
         fn rechercher(&self, expediteur: &NSSearchField) {
             let ivars = self.ivars();
-            let etat = unsafe { &mut *ivars.etat };
-            let texte = unsafe { expediteur.stringValue() }.to_string().to_lowercase();
+            let texte = expediteur.stringValue().to_string().to_lowercase();
+            let etat = unsafe { &mut *ivars.etat.get() };
             journal::info(&format!("recherche : « {texte} »"));
             etat.filtre = texte;
             self.rafraichir_grille();
@@ -1252,7 +1304,7 @@ impl Cible {
     /// panneau ont deja resolu leur UUID.
     fn choisir_ecran(&self, index: usize) {
         let ivars = self.ivars();
-        let etat = unsafe { &mut *ivars.etat };
+        let etat = unsafe { &mut *ivars.etat.get() };
         if index >= etat.ecrans.len() {
             return;
         }
@@ -1273,11 +1325,11 @@ impl Cible {
     /// Applique un intervalle (menu ou panneau) sans dupliquer la logique.
     fn appliquer_intervalle(&self, secondes: u64) {
         {
-            let etat = unsafe { &mut *self.ivars().etat };
+            let etat = unsafe { &mut *self.ivars().etat.get() };
             etat.reglages.diaporama_intervalle = secondes.clamp(60, 86400);
             etat.enregistrer();
         }
-        if unsafe { &*self.ivars().etat }.diaporama_actif {
+        if unsafe { &*self.ivars().etat.get() }.diaporama_actif {
             self.programmer_diaporama();
         }
         self.rafraichir();
@@ -1286,7 +1338,7 @@ impl Cible {
     /// Coche/decoche un ecran participant au diaporama (cle UUID).
     fn basculer_participation(&self, cle: &str) {
         {
-            let etat = unsafe { &mut *self.ivars().etat };
+            let etat = unsafe { &mut *self.ivars().etat.get() };
             let cles = etat
                 .reglages
                 .diaporama_ecrans
@@ -1303,11 +1355,13 @@ impl Cible {
 
     /// Rafraichit le panneau seul, sans reconstruire la galerie.
     fn rafraichir_panneau(&self) {
-        if self.ivars().etat.is_null() {
+        if self.ivars().etat.get().is_null() {
             return;
         }
-        if let Some(panneau) = self.ivars().panneau.borrow().as_ref() {
-            panneau.actualiser(unsafe { &*self.ivars().etat });
+        let etat = unsafe { &*self.ivars().etat.get() }.instantane_reglages();
+        let panneau = self.ivars().panneau.borrow().clone();
+        if let Some(panneau) = panneau {
+            panneau.actualiser(&etat);
         }
     }
 
@@ -1323,7 +1377,7 @@ impl Cible {
 
     fn retirer_favori_chemin(&self, chemin: &std::path::Path) {
         {
-            let etat = unsafe { &mut *self.ivars().etat };
+            let etat = unsafe { &mut *self.ivars().etat.get() };
             etat.reglages
                 .dossiers_favoris
                 .retain(|p| p != &chemin.to_string_lossy());
@@ -1332,11 +1386,20 @@ impl Cible {
         self.rafraichir();
     }
 
+    fn relever_fonds_actifs(&self) {
+        let ecrans = unsafe { &*self.ivars().etat.get() }.ecrans.clone();
+        let actifs = ecrans.iter().filter_map(|e| {
+            let ecran = ecrans::retrouver_identifiant(e.identifiant)?;
+            fond_ecran::image_courante(&ecran).map(|p| p.to_string_lossy().into_owned())
+        }).collect();
+        unsafe { &mut *self.ivars().etat.get() }.fonds_actifs = actifs;
+    }
+
     fn arreter_diaporama(&self) {
         if let Some(minuterie) = self.ivars().minuterie.borrow_mut().take() {
             minuterie.invalidate();
         }
-        unsafe { &mut *self.ivars().etat }.diaporama_actif = false;
+        unsafe { &mut *self.ivars().etat.get() }.diaporama_actif = false;
     }
 
     /// Enregistre l'intention **avant** l'appel Apple et rend son numero de
@@ -1402,31 +1465,21 @@ impl Cible {
             .collect();
         let mut confirmees_tick = 0usize;
         for (cle, sequence, chemin) in demandes {
-            let (libelle, ecran) = match unsafe { &*self.ivars().etat }
-                .ecrans
-                .iter()
-                .find(|e| e.cle == cle)
-            {
-                Some(e) => (
-                    format!("Display {}", e.index + 1),
-                    ecrans::retrouver_identifiant(e.identifiant),
-                ),
+            let cible = unsafe { &*self.ivars().etat.get() }.ecrans.iter().find(|e| e.cle == cle).cloned();
+            let (libelle, ecran) = match cible {
+                Some(e) => (format!("Display {}", e.index + 1), ecrans::retrouver_identifiant(e.identifiant)),
                 None => (format!("Display {cle}"), None),
             };
+            let constat = ecran.as_ref().and_then(|e| fond_ecran::image_courante(e));
             let issue = {
                 let mut suivi = self.ivars().suivi.borrow_mut();
-                match ecran {
-                    Some(ecran) => {
-                        let constat = fond_ecran::image_courante(&ecran);
-                        suivi.relire(&cle, sequence, constat.as_deref(), maintenant)
-                    }
-                    None => suivi.ecran_disparu(&cle, sequence),
-                }
+                if ecran.is_some() { suivi.relire(&cle, sequence, constat.as_deref(), maintenant) }
+                else { suivi.ecran_disparu(&cle, sequence) }
             };
             match issue {
                 Issue::Confirmee => {
                     confirmees_tick += 1;
-                    unsafe { &mut *self.ivars().etat }
+                    unsafe { &mut *self.ivars().etat.get() }
                         .reglages
                         .image_par_ecran
                         .insert(cle.clone(), chemin.to_string_lossy().into_owned());
@@ -1466,11 +1519,11 @@ impl Cible {
             }
         }
         if confirmees_tick > 0 {
-            unsafe { &mut *self.ivars().etat }.enregistrer();
+            unsafe { &mut *self.ivars().etat.get() }.enregistrer();
         }
         if self.ivars().suivi.borrow().est_vide() {
             self.arreter_relecture();
-            unsafe { &mut *self.ivars().etat }.relever_fonds_actifs();
+            self.relever_fonds_actifs();
             self.rafraichir();
             if let Some(texte) = self.prendre_bilan() {
                 self.message(&texte);
@@ -1480,7 +1533,7 @@ impl Cible {
 
     fn programmer_diaporama(&self) {
         self.arreter_diaporama();
-        let intervalle = unsafe { &*self.ivars().etat }
+        let intervalle = unsafe { &*self.ivars().etat.get() }
             .reglages
             .diaporama_intervalle
             .clamp(60, 86400) as f64;
@@ -1499,12 +1552,12 @@ impl Cible {
                 .addTimer_forMode(&minuterie, objc2_foundation::NSRunLoopCommonModes);
         }
         *self.ivars().minuterie.borrow_mut() = Some(minuterie);
-        unsafe { &mut *self.ivars().etat }.diaporama_actif = true;
+        unsafe { &mut *self.ivars().etat.get() }.diaporama_actif = true;
     }
 
     fn selection_diaporama_modifiee(&self) {
-        let vide = unsafe { &*self.ivars().etat }.plan_diaporama().is_empty();
-        if vide && unsafe { &*self.ivars().etat }.diaporama_actif {
+        let vide = unsafe { &*self.ivars().etat.get() }.plan_diaporama().is_empty();
+        if vide && unsafe { &*self.ivars().etat.get() }.diaporama_actif {
             self.arreter_diaporama();
         }
         self.rafraichir_grille();
@@ -1514,17 +1567,17 @@ impl Cible {
     fn avancer_diaporama(&self) {
         // Relever les fonds actuels avant de calculer la suite, y compris les
         // changements faits par l’utilisateur dans les reglages macOS.
-        let etat = unsafe { &mut *self.ivars().etat };
-        for ecran in &etat.ecrans {
-            if let Some(ecran_vivant) = ecrans::retrouver_identifiant(ecran.identifiant) {
-                if let Some(chemin) = fond_ecran::image_courante(&ecran_vivant) {
-                    etat.reglages
-                        .image_par_ecran
-                        .insert(ecran.cle.clone(), chemin.to_string_lossy().into_owned());
-                }
-            }
-        }
-        let plan = etat.plan_diaporama();
+        let ecrans = unsafe { &*self.ivars().etat.get() }.ecrans.clone();
+        let courantes: Vec<_> = ecrans.iter().filter_map(|e| {
+            let vivant = ecrans::retrouver_identifiant(e.identifiant)?;
+            let chemin = fond_ecran::image_courante(&vivant)?;
+            Some((e.cle.clone(), chemin.to_string_lossy().into_owned()))
+        }).collect();
+        let plan = {
+            let etat = unsafe { &mut *self.ivars().etat.get() };
+            etat.reglages.image_par_ecran.extend(courantes);
+            etat.plan_diaporama()
+        };
         if plan.is_empty() {
             self.arreter_diaporama();
             self.rafraichir();
@@ -1538,7 +1591,7 @@ impl Cible {
             // L'intention est enregistree avant l'appel : meme si macOS refuse,
             // l'ancienne demande de cet ecran ne peut plus confirmer.
             let sequence = self.enregistrer_intention(&cle, &chemin);
-            let cible = etat.ecrans.iter().find(|e| e.cle == cle);
+            let cible = ecrans.iter().find(|e| e.cle == cle);
             let libelle = cible
                 .map(|e| format!("Display {}", e.index + 1))
                 .unwrap_or_else(|| format!("Display {cle}"));
@@ -1569,8 +1622,8 @@ impl Cible {
                 }
             }
         }
-        etat.enregistrer();
-        etat.relever_fonds_actifs();
+        unsafe { &mut *self.ivars().etat.get() }.enregistrer();
+        self.relever_fonds_actifs();
         self.rafraichir();
         if erreurs.is_empty() {
             self.message(&format!(
@@ -1598,7 +1651,7 @@ impl Cible {
 
     fn menu_diaporama(&self) -> Retained<NSMenu> {
         let mtm = MainThreadMarker::new().expect("menu sur le fil principal");
-        let etat = unsafe { &*self.ivars().etat };
+        let etat = unsafe { &*self.ivars().etat.get() }.instantane_reglages();
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
         let demarrer = self.element_menu(
@@ -1611,11 +1664,11 @@ impl Cible {
             "",
             None,
         );
-        demarrer.setEnabled(etat.diaporama_actif || !etat.plan_diaporama().is_empty());
+        demarrer.setEnabled(etat.diaporama_actif || !etat.plan_vide);
         menu.addItem(&demarrer);
         let suivante =
             self.element_menu("Next image", Some(sel!(suivanteDiaporama:)), "", None);
-        suivante.setEnabled(!etat.plan_diaporama().is_empty());
+        suivante.setEnabled(!etat.plan_vide);
         menu.addItem(&suivante);
         let aleatoire =
             self.element_menu("Random order", Some(sel!(aleatoireDiaporama:)), "", None);
@@ -1657,7 +1710,7 @@ impl Cible {
                 item.setRepresentedObject(Some(&NSString::from_str(&ecran.cle)));
             }
             item.setState(
-                if etat.cibles_diaporama().iter().any(|e| e.cle == ecran.cle) {
+                if etat.reglages.diaporama_ecrans.as_ref().map(|cles| cles.contains(&ecran.cle)).unwrap_or(true) {
                     1
                 } else {
                     0
@@ -1697,8 +1750,8 @@ impl Cible {
 
     fn message(&self, texte: &str) {
         journal::info(texte);
-        if !self.ivars().etat_texte.is_null() {
-            unsafe { &*self.ivars().etat_texte }.setStringValue(&NSString::from_str(texte));
+        if !self.ivars().etat_texte.get().is_null() {
+            unsafe { &*self.ivars().etat_texte.get() }.setStringValue(&NSString::from_str(texte));
         }
         if let Some(details) = self.ivars().details.borrow().as_ref() { details.setHidden(false); }
     }
@@ -1707,7 +1760,7 @@ impl Cible {
         let contexte = expediteur
             .downcast_ref::<NSMenuItem>()
             .and_then(chemin_represente);
-        let etat = unsafe { &mut *self.ivars().etat };
+        let etat = unsafe { &mut *self.ivars().etat.get() };
         let selection_avant = etat.selection;
         if let Some(chemin) = contexte {
             etat.selection = etat.images.iter().position(|i| i.chemin == chemin);
@@ -1725,7 +1778,7 @@ impl Cible {
     }
 
     fn candidats_avif(&self) -> Vec<PathBuf> {
-        unsafe { &*self.ivars().etat }.images.iter()
+        unsafe { &*self.ivars().etat.get() }.images.iter()
             .filter(|i| crate::avif::est_candidate(&i.chemin))
             .map(|i| i.chemin.clone()).collect()
     }
@@ -1756,6 +1809,10 @@ impl Cible {
     }
 
     fn menu_image(&self, chemin: &std::path::Path) -> Retained<NSMenu> {
+        let inclus = {
+            let etat = unsafe { &*self.ivars().etat.get() };
+            etat.reglages.favori_inclus(&chemin.to_string_lossy(), etat.cle_ecran_courant())
+        };
         let mtm = MainThreadMarker::new().expect("menu image sur le fil principal");
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
@@ -1767,49 +1824,42 @@ impl Cible {
         ] {
             menu.addItem(&self.element_menu(titre, Some(action), "", Some(chemin)));
         }
-        let etat = unsafe { &*self.ivars().etat };
         let selection = self.element_menu(
             "Include in slideshow",
             Some(sel!(imageDiaporama:)),
             "",
             Some(chemin),
         );
-        selection.setState(
-            if etat
-                .reglages
-                .favori_inclus(&chemin.to_string_lossy(), etat.cle_ecran_courant())
-            {
-                1
-            } else {
-                0
-            },
-        );
+        selection.setState(if inclus { 1 } else { 0 });
         menu.addItem(&selection);
         menu
     }
 
     fn menu_dossiers(&self) -> Retained<NSMenu> {
+        let (favoris, dossier) = {
+            let etat = unsafe { &*self.ivars().etat.get() };
+            (etat.reglages.dossiers_favoris.clone(), etat.dossier.clone())
+        };
         let mtm = MainThreadMarker::new().expect("menu dossiers sur le fil principal");
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
-        let etat = unsafe { &*self.ivars().etat };
-        if etat.reglages.dossiers_favoris.is_empty() {
+        if favoris.is_empty() {
             let vide =
                 self.element_menu("No favorite folders — use the star", None, "", None);
             vide.setEnabled(false);
             menu.addItem(&vide);
         }
-        for texte in &etat.reglages.dossiers_favoris {
+        for texte in &favoris {
             let chemin = std::path::Path::new(texte);
             let element = self.element_menu(texte, Some(sel!(ouvrirFavori:)), "", Some(chemin));
-            element.setState(if chemin == etat.dossier { 1 } else { 0 });
+            element.setState(if chemin == dossier { 1 } else { 0 });
             menu.addItem(&element);
         }
-        if !etat.reglages.dossiers_favoris.is_empty() {
+        if !favoris.is_empty() {
             menu.addItem(&NSMenuItem::separatorItem(mtm));
             let retirer = self.element_menu("Remove favorite folder", None, "", None);
             let sous_menu = NSMenu::new(mtm);
-            for texte in &etat.reglages.dossiers_favoris {
+            for texte in &favoris {
                 sous_menu.addItem(&self.element_menu(
                     texte,
                     Some(sel!(retirerFavori:)),
@@ -1825,7 +1875,10 @@ impl Cible {
 
     fn actualiser_menu(&self) {
         let mtm = MainThreadMarker::new().expect("menu sur le fil principal");
-        let etat = unsafe { &*self.ivars().etat };
+        let (etat, selection) = {
+            let etat = unsafe { &*self.ivars().etat.get() };
+            (etat.instantane_reglages(), etat.selection.is_some())
+        };
         let Some(menu) = self.ivars().menu.borrow().clone() else {
             return;
         };
@@ -1873,7 +1926,7 @@ impl Cible {
         ] {
             let element = self.element_menu(titre, Some(action), "", None);
             if action != sel!(actualiser:) && action != sel!(cacheAvif:) {
-                element.setEnabled(etat.selection.is_some());
+                element.setEnabled(selection);
             }
             menu.addItem(&element);
         }
@@ -1956,23 +2009,24 @@ impl Cible {
             avif_panneau: RefCell::new(None),
             avif_tache: RefCell::new(None),
             avif_sources: RefCell::new(Vec::new()),
-            etat: std::ptr::null_mut(),
+            etat: Cell::new(std::ptr::null_mut()),
+            generation_grille: Cell::new(0),
             surface: RefCell::new(None),
             details: RefCell::new(None),
-            apercu: std::ptr::null_mut(),
-            etat_texte: std::ptr::null_mut(),
-            nom_fichier: std::ptr::null_mut(),
-            dimensions: std::ptr::null_mut(),
-            bouton_appliquer: std::ptr::null_mut(),
-            document: std::ptr::null_mut(),
-            defilement: std::ptr::null_mut(),
-            recherche: std::ptr::null_mut(),
+            apercu: Cell::new(std::ptr::null_mut()),
+            etat_texte: Cell::new(std::ptr::null_mut()),
+            nom_fichier: Cell::new(std::ptr::null_mut()),
+            dimensions: Cell::new(std::ptr::null_mut()),
+            bouton_appliquer: Cell::new(std::ptr::null_mut()),
+            document: Cell::new(std::ptr::null_mut()),
+            defilement: Cell::new(std::ptr::null_mut()),
+            recherche: Cell::new(std::ptr::null_mut()),
             menu: RefCell::new(None),
-            segments: std::ptr::null_mut(),
-            fenetre: std::ptr::null_mut(),
-            favori: std::ptr::null_mut(),
-            bouton_diaporama: std::ptr::null_mut(),
-            bouton_suivante: std::ptr::null_mut(),
+            segments: Cell::new(std::ptr::null_mut()),
+            fenetre: Cell::new(std::ptr::null_mut()),
+            favori: Cell::new(std::ptr::null_mut()),
+            bouton_diaporama: Cell::new(std::ptr::null_mut()),
+            bouton_suivante: Cell::new(std::ptr::null_mut()),
             apercu_plein: RefCell::new(None),
             minuterie: RefCell::new(None),
             suivi: RefCell::new(suivi::Suivi::new()),
@@ -1985,10 +2039,7 @@ impl Cible {
 
     /// Etat, avant que les vues existent.
     fn definir_etat(&self, etat: *mut Etat) {
-        let ivars = self.ivars() as *const CibleIvars as *mut CibleIvars;
-        unsafe {
-            (*ivars).etat = etat;
-        }
+        self.ivars().etat.set(etat);
     }
 
     /// Vues, une fois qu'elles existent.
@@ -2005,18 +2056,16 @@ impl Cible {
         recherche: &NSSearchField,
         menu: &NSMenu,
     ) {
-        let ivars = self.ivars() as *const CibleIvars as *mut CibleIvars;
-        unsafe {
-            (*ivars).apercu = apercu as *const NSImageView as *mut NSImageView;
-            (*ivars).etat_texte = etat_texte as *const NSTextField as *mut NSTextField;
-            (*ivars).nom_fichier = nom_fichier as *const NSTextField as *mut NSTextField;
-            (*ivars).dimensions = dimensions as *const NSTextField as *mut NSTextField;
-            (*ivars).bouton_appliquer = bouton_appliquer as *const NSButton as *mut NSButton;
-            (*ivars).document = document as *const NSView as *mut NSView;
-            (*ivars).defilement = defilement as *const NSScrollView as *mut NSScrollView;
-            (*ivars).recherche = recherche as *const NSSearchField as *mut NSSearchField;
-            *(*ivars).menu.borrow_mut() = Some(menu.retain());
-        }
+        let ivars = self.ivars();
+        ivars.apercu.set(apercu as *const NSImageView as *mut NSImageView);
+        ivars.etat_texte.set(etat_texte as *const NSTextField as *mut NSTextField);
+        ivars.nom_fichier.set(nom_fichier as *const NSTextField as *mut NSTextField);
+        ivars.dimensions.set(dimensions as *const NSTextField as *mut NSTextField);
+        ivars.bouton_appliquer.set(bouton_appliquer as *const NSButton as *mut NSButton);
+        ivars.document.set(document as *const NSView as *mut NSView);
+        ivars.defilement.set(defilement as *const NSScrollView as *mut NSScrollView);
+        ivars.recherche.set(recherche as *const NSSearchField as *mut NSSearchField);
+        *ivars.menu.borrow_mut() = Some(menu.retain());
     }
 
     /// Change de dossier : relit, regenere les vignettes, reconstruit la grille.
@@ -2026,15 +2075,15 @@ impl Cible {
             return;
         }
         {
-            let etat = unsafe { &mut *self.ivars().etat };
+            let etat = unsafe { &mut *self.ivars().etat.get() };
             let cle = etat.ecrans.get(etat.ecran_courant).map(|e| e.cle.clone());
             etat.reglages.memoriser_dossier(&dossier, cle.as_deref());
             etat.dossier = dossier;
             etat.filtre.clear();
-            unsafe { &*self.ivars().recherche }.setStringValue(&NSString::from_str(""));
             etat.enregistrer();
             etat.recharger();
         }
+        unsafe { &*self.ivars().recherche.get() }.setStringValue(&NSString::from_str(""));
         self.rafraichir_grille();
         self.rafraichir();
     }
@@ -2042,39 +2091,60 @@ impl Cible {
     /// Seuls les pixels visibles et une rangee de marge restent charges.
     fn charger_zone_visible(&self) {
         let ivars = self.ivars();
-        if ivars.etat.is_null() || ivars.document.is_null() { return; }
-        let etat = unsafe { &mut *ivars.etat };
-        if etat.chargement_integral { return; }
-        let visible = unsafe { &*ivars.document }.visibleRect();
-        let mut indices: Vec<_> = etat.cellules.iter().filter_map(|(&adresse, &index)| {
-            let cadre = unsafe { &*(adresse as *const NSButton) }.frame();
+        if ivars.etat.get().is_null() || ivars.document.get().is_null() { return; }
+        let generation = ivars.generation_grille.get();
+        let cellules = {
+            let etat = unsafe { &*ivars.etat.get() };
+            if etat.chargement_integral { return; }
+            etat.cellules.iter().map(|(&adresse, &index)| (
+                unsafe { &*(adresse as *const NSButton) }.retain(), index,
+            )).collect::<Vec<_>>()
+        };
+        let visible = unsafe { &*ivars.document.get() }.visibleRect();
+        let mut indices: Vec<_> = cellules.iter().filter_map(|(bouton, index)| {
+            let cadre = bouton.frame();
             let marge = cadre.size.height + ESPACEMENT;
             (cadre.origin.y < visible.origin.y + visible.size.height + marge
-                && cadre.origin.y + cadre.size.height > visible.origin.y - marge)
-                .then_some(index)
+                && cadre.origin.y + cadre.size.height > visible.origin.y - marge).then_some(*index)
         }).collect();
         indices.sort_unstable();
-        etat.demander_vignettes(indices);
-        // NSButton retient aussi l'image : liberer les deux proprietaires.
-        for (&adresse, &index) in &etat.cellules {
-            if etat.vignettes[index].is_none() {
-                let bouton = unsafe { &*(adresse as *const NSButton) };
-                bouton.setImage(None);
-                bouton.setTitle(&NSString::from_str(if etat.vignettes_en_attente[index] { "…" } else { "" }));
-            }
+        if ivars.generation_grille.get() != generation { return; }
+        let (a_vider, statut) = {
+            let etat = unsafe { &mut *ivars.etat.get() };
+            etat.demander_vignettes(indices);
+            let a_vider = cellules.into_iter().filter_map(|(bouton, index)|
+                etat.vignettes[index].is_none().then_some((bouton, etat.vignettes_en_attente[index]))
+            ).collect::<Vec<_>>();
+            (a_vider, etat.statut_bibliotheque())
+        };
+        for (bouton, en_attente) in a_vider {
+            bouton.setImage(None);
+            bouton.setTitle(&NSString::from_str(if en_attente { "…" } else { "" }));
         }
-        unsafe { &*ivars.etat_texte }.setStringValue(&NSString::from_str(&etat.statut_bibliotheque()));
+        unsafe { &*ivars.etat_texte.get() }.setStringValue(&NSString::from_str(&statut));
     }
 
     /// (Re)construit les cellules de la grille pour l'etat courant.
     fn rafraichir_grille(&self) {
         let ivars = self.ivars();
-        if ivars.etat.is_null() || ivars.document.is_null() {
+        if ivars.etat.get().is_null() || ivars.document.get().is_null() {
             return;
         }
-        let etat = unsafe { &mut *ivars.etat };
-        let document = unsafe { &*ivars.document };
-        let defilement = unsafe { &*ivars.defilement };
+        let generation = ivars.generation_grille.get().wrapping_add(1);
+        ivars.generation_grille.set(generation);
+        // Aucun emprunt de l'etat pendant les notifications synchrones AppKit.
+        let (affiches, filtre) = {
+            let etat = unsafe { &mut *ivars.etat.get() };
+            etat.cellules.clear();
+            let images = etat.indices_affiches().into_iter().map(|index| (
+                index, etat.images[index].clone(), etat.vignettes[index].clone(),
+                etat.vignettes_en_attente[index],
+            )).collect::<Vec<_>>();
+            (images, etat.filtre.clone())
+        };
+        let mut cellules = HashMap::new();
+        let document = unsafe { &*ivars.document.get() };
+        let defilement = unsafe { &*ivars.defilement.get() };
         defilement.contentView().setPostsBoundsChangedNotifications(false);
 
         // On retire les anciennes cellules avant d'en recreer.
@@ -2083,19 +2153,18 @@ impl Cible {
             let vue = unsafe { anciennes.objectAtIndex(index) };
             unsafe { vue.removeFromSuperview() };
         }
-        etat.cellules.clear();
+        if ivars.generation_grille.get() != generation { return; }
 
         let largeur_grille = defilement.contentSize().width;
         let (colonnes, largeur_cellule, mut hauteur_cellule) = mesures_grille(largeur_grille);
         let marge = 2.0;
-        let affiches = etat.indices_affiches();
         let lignes = affiches.len().div_ceil(colonnes.max(1));
         if lignes > 0 {
             hauteur_cellule = hauteur_cellule.max((defilement.contentSize().height - 8.0
                 - ESPACEMENT * (lignes.saturating_sub(1)) as f64) / lignes as f64);
         }
 
-        for (position, index) in affiches.iter().enumerate() {
+        for (position, (index, image, vignette, en_attente)) in affiches.iter().enumerate() {
             let colonne = position % colonnes;
             let ligne = position / colonnes;
             let bouton = unsafe {
@@ -2109,16 +2178,17 @@ impl Cible {
                     bouton.setTarget(Some(self));
                     bouton.setAction(Some(sel!(celluleCliquee:)));
                     bouton.setImagePosition(objc2_app_kit::NSCellImagePosition::ImageOnly);
-                    let menu = self.menu_image(&etat.images[*index].chemin);
+                    let menu = self.menu_image(&image.chemin);
                     bouton.setMenu(Some(&menu));
                     Retained::into_super(bouton)
                 }
             };
+            if ivars.generation_grille.get() != generation { return; }
             unsafe {
                 bouton.setBordered(false);
                 // Le titre devient vide apres le chargement de l'image :
                 // conserver un nom accessible independant de ce placeholder.
-                let nom = NSString::from_str(&etat.images[*index].nom);
+                let nom = NSString::from_str(&image.nom);
                 let _: () = msg_send![&*bouton, setAccessibilityLabel: &*nom];
                 bouton.setToolTip(Some(&nom));
                 bouton.setFrame(NSRect {
@@ -2131,11 +2201,11 @@ impl Cible {
                         height: hauteur_cellule,
                     },
                 });
-                if let Some(vignette) = etat.vignettes.get(*index).and_then(|v| v.as_deref()) {
+                if let Some(vignette) = vignette.as_deref() {
                     bouton.setImage(Some(vignette));
                     bouton.setImageScaling(NSImageScaling::ScaleAxesIndependently);
                 } else {
-                    bouton.setTitle(&NSString::from_str(if etat.vignettes_en_attente[*index] {
+                    bouton.setTitle(&NSString::from_str(if *en_attente {
                         "…"
                     } else {
                         "(unreadable)"
@@ -2170,8 +2240,8 @@ impl Cible {
                 }
                 document.addSubview(&bouton);
             }
-            etat.cellules
-                .insert(unsafe { &*bouton } as *const NSButton as usize, *index);
+            if ivars.generation_grille.get() != generation { return; }
+            cellules.insert(unsafe { &*bouton } as *const NSButton as usize, *index);
         }
 
         let lignes = affiches.len().div_ceil(colonnes.max(1));
@@ -2189,12 +2259,14 @@ impl Cible {
             "grille : {} vignette(s) affichee(s) sur {} colonnes{}",
             affiches.len(),
             colonnes,
-            if etat.filtre.is_empty() {
+            if filtre.is_empty() {
                 String::new()
             } else {
-                format!(" (filtre « {} »)", etat.filtre)
+                format!(" (filtre « {} »)", filtre)
             }
         ));
+        if ivars.generation_grille.get() != generation { return; }
+        unsafe { &mut *ivars.etat.get() }.cellules = cellules;
         defilement.contentView().setPostsBoundsChangedNotifications(true);
         self.charger_zone_visible();
     }
@@ -2202,14 +2274,24 @@ impl Cible {
     /// Reapplique l'etat : apercu, informations, libelle du bouton, selection.
     fn rafraichir(&self) {
         let ivars = self.ivars();
-        if ivars.etat.is_null() {
+        if ivars.etat.get().is_null() {
             return;
         }
-        let etat = unsafe { &*ivars.etat };
+        let (image, dossier, favori, actif, disponible, libelle, legende, selection, nb_ecrans, courant) = {
+            let etat = unsafe { &*ivars.etat.get() };
+            let libelle = if etat.reglages.meme_image_partout {
+                "Apply to all".to_owned()
+            } else if etat.ecrans.len() > 1 {
+                format!("Apply (display {})", etat.ecran_courant + 1)
+            } else { "Apply".to_owned() };
+            (etat.selection.and_then(|i| etat.images.get(i)).cloned(), etat.dossier.clone(),
+                etat.reglages.dossiers_favoris.contains(&etat.dossier.to_string_lossy().into_owned()),
+                etat.diaporama_actif, !etat.plan_diaporama().is_empty(), libelle,
+                etat.statut_bibliotheque(), etat.selection.is_some(), etat.ecrans.len(), etat.ecran_courant)
+        };
 
-        let (apercu, nom, dims) = match etat.selection {
-            Some(index) => {
-                let image = &etat.images[index];
+        let (apercu, nom, dims) = match image.as_ref() {
+            Some(image) => {
                 let debut = std::time::Instant::now();
                 let apercu = unsafe {
                     bibliotheque::apercu(&image.chemin, 1600, 780).map(|v| {
@@ -2246,100 +2328,94 @@ impl Cible {
             ),
         };
 
-        if !ivars.favori.is_null() {
-            let favori = etat
-                .reglages
-                .dossiers_favoris
-                .contains(&etat.dossier.to_string_lossy().into_owned());
-            unsafe { &*ivars.favori }.setImage(Some(&symbole(if favori {
+        if !ivars.favori.get().is_null() {
+            unsafe { &*ivars.favori.get() }.setImage(Some(&symbole(if favori {
                 "star.fill"
             } else {
                 "star"
             })));
-            unsafe { &*ivars.favori }.setToolTip(Some(&NSString::from_str(if favori {
+            unsafe { &*ivars.favori.get() }.setToolTip(Some(&NSString::from_str(if favori {
                 "Remove folder from favorites"
             } else {
                 "Add folder to favorites"
             })));
         }
-        if !ivars.fenetre.is_null() {
-            unsafe { &*ivars.fenetre }.setTitle(&NSString::from_str(&format!(
+        if !ivars.fenetre.get().is_null() {
+            unsafe { &*ivars.fenetre.get() }.setTitle(&NSString::from_str(&format!(
                 "Mural — {}",
-                etat.dossier
+                dossier
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
             )));
-            unsafe { &*ivars.fenetre }
-                .setRepresentedFilename(&NSString::from_str(&etat.dossier.to_string_lossy()));
+            unsafe { &*ivars.fenetre.get() }
+                .setRepresentedFilename(&NSString::from_str(&dossier.to_string_lossy()));
         }
-        if !ivars.bouton_diaporama.is_null() {
-            let disponible = !etat.plan_diaporama().is_empty();
-            let bouton = unsafe { &*ivars.bouton_diaporama };
-            bouton.setImage(Some(&symbole(if etat.diaporama_actif {
+        if !ivars.bouton_diaporama.get().is_null() {
+            let bouton = unsafe { &*ivars.bouton_diaporama.get() };
+            bouton.setImage(Some(&symbole(if actif {
                 "pause.fill"
             } else {
                 "play.fill"
             })));
-            bouton.setToolTip(Some(&NSString::from_str(if etat.diaporama_actif {
+            bouton.setToolTip(Some(&NSString::from_str(if actif {
                 "Pause slideshow"
             } else {
                 "Start slideshow"
             })));
-            bouton.setEnabled(etat.diaporama_actif || disponible);
-            unsafe { &*ivars.bouton_suivante }.setEnabled(disponible);
+            bouton.setEnabled(actif || disponible);
+            unsafe { &*ivars.bouton_suivante.get() }.setEnabled(disponible);
         }
-        let libelle = if etat.reglages.meme_image_partout {
-            "Apply to all".to_owned()
-        } else if etat.ecrans.len() > 1 {
-            format!("Apply (display {})", etat.ecran_courant + 1)
-        } else {
-            "Apply".to_string()
-        };
-
-        let legende = etat.statut_bibliotheque();
         unsafe {
-            (*ivars.apercu).setImage(apercu.as_deref());
-            (*ivars.nom_fichier).setStringValue(&NSString::from_str(&nom));
-            (*ivars.dimensions).setStringValue(&NSString::from_str(&dims));
-            (*ivars.dimensions).setToolTip(Some(&NSString::from_str(&dims)));
-            (*ivars.etat_texte).setStringValue(&NSString::from_str(
+            (*ivars.apercu.get()).setImage(apercu.as_deref());
+            (*ivars.nom_fichier.get()).setStringValue(&NSString::from_str(&nom));
+            (*ivars.dimensions.get()).setStringValue(&NSString::from_str(&dims));
+            (*ivars.dimensions.get()).setToolTip(Some(&NSString::from_str(&dims)));
+            (*ivars.etat_texte.get()).setStringValue(&NSString::from_str(
                 &legende,
             ));
-            (*ivars.bouton_appliquer).setTitle(&NSString::from_str(&libelle));
-            (*ivars.bouton_appliquer)
-                .setEnabled(etat.selection.is_some() && !etat.ecrans.is_empty());
+            (*ivars.bouton_appliquer.get()).setTitle(&NSString::from_str(&libelle));
+            (*ivars.bouton_appliquer.get())
+                .setEnabled(selection && nb_ecrans != 0);
             // Le panneau de reglages, la barre principale et les menus lisent
             // tous le meme etat : la selection d'ecran reste synchronisee.
-            if !ivars.segments.is_null() {
-                (*ivars.segments).setSelectedSegment(if etat.ecrans.is_empty() {
+            if !ivars.segments.get().is_null() {
+                (*ivars.segments.get()).setSelectedSegment(if nb_ecrans == 0 {
                     -1
                 } else {
-                    etat.ecran_courant as isize
+                    courant as isize
                 });
             }
         }
 
-        self.rafraichir_selection();
-        if let Some(panneau) = self.ivars().panneau.borrow().as_ref() {
-            panneau.actualiser(etat);
+        let erreur = unsafe { &*ivars.etat.get() }.erreur_sauvegarde.is_some();
+        if erreur {
+            let details = ivars.details.borrow().clone();
+            if let Some(details) = details { details.setHidden(false); }
         }
+        self.rafraichir_selection();
+        self.rafraichir_panneau();
     }
 
     fn rafraichir_selection(&self) {
-        let etat = unsafe { &*self.ivars().etat };
-        // Contour de selection : 3 points, couleur d'accent, a l'interieur.
-        let selection = etat.selection;
-        let accent = unsafe { NSColor::controlAccentColor() };
-        let couleur = unsafe { accent.CGColor() };
-        for (pointeur, index) in etat.cellules.iter() {
-            let bouton: &NSButton = unsafe { &*(*pointeur as *const NSButton) };
-            let selectionnee = selection == Some(*index);
-            let chemin = etat.images[*index].chemin.to_string_lossy();
+        let cellules: Vec<_> = {
+            let etat = unsafe { &*self.ivars().etat.get() };
+            etat.cellules.iter().filter_map(|(pointeur, index)| {
+                let image = etat.images.get(*index)?;
+                let chemin = image.chemin.to_string_lossy();
+                Some((unsafe { &*(*pointeur as *const NSButton) }.retain(),
+                    etat.selection == Some(*index),
+                    etat.fonds_actifs.iter().any(|p| p == chemin.as_ref()),
+                    etat.reglages.favori_inclus(&chemin, etat.cle_ecran_courant())))
+            }).collect()
+        };
+        let accent = NSColor::controlAccentColor();
+        let couleur = accent.CGColor();
+        for (bouton, selectionnee, actif, inclus) in cellules {
             for badge in bouton.subviews() {
                 match badge.tag() {
-                    8101 => badge.setHidden(!etat.fonds_actifs.iter().any(|p| p == chemin.as_ref())),
-                    8102 => badge.setHidden(!etat.reglages.favori_inclus(&chemin, etat.cle_ecran_courant())),
+                    8101 => badge.setHidden(!actif),
+                    8102 => badge.setHidden(!inclus),
                     _ => {}
                 }
             }
@@ -2885,12 +2961,12 @@ pub fn construire(
         );
     }
     unsafe {
-        let ivars = cible.ivars() as *const CibleIvars as *mut CibleIvars;
-        (*ivars).segments = &*segments as *const NSSegmentedControl as *mut NSSegmentedControl;
-        (*ivars).fenetre = &*fenetre as *const NSWindow as *mut NSWindow;
-        (*ivars).favori = &*bouton_favori as *const NSButton as *mut NSButton;
-        (*ivars).bouton_diaporama = &*bouton_diaporama as *const NSButton as *mut NSButton;
-        (*ivars).bouton_suivante = &*bouton_suivante as *const NSButton as *mut NSButton;
+        let ivars = cible.ivars();
+        ivars.segments.set(&*segments as *const NSSegmentedControl as *mut NSSegmentedControl);
+        ivars.fenetre.set(&*fenetre as *const NSWindow as *mut NSWindow);
+        ivars.favori.set(&*bouton_favori as *const NSButton as *mut NSButton);
+        ivars.bouton_diaporama.set(&*bouton_diaporama as *const NSButton as *mut NSButton);
+        ivars.bouton_suivante.set(&*bouton_suivante as *const NSButton as *mut NSButton);
         for nom in [objc2_app_kit::NSWindowWillCloseNotification] {
             objc2_foundation::NSNotificationCenter::defaultCenter()
                 .addObserver_selector_name_object(

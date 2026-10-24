@@ -27,7 +27,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSObject, NSPoint, NSRect, NSSize, NSString};
 
-use crate::app::Etat;
+use crate::app::InstantaneReglages;
 
 /// Largeur confortable du panneau.
 pub const LARGEUR: f64 = 600.0;
@@ -187,6 +187,8 @@ pub struct Panneau {
     cible: *const NSObject,
 
     // Signatures : reconstruire uniquement quand la donnee change.
+    actualisation_en_cours: Cell<bool>,
+    actualisation_attente: RefCell<Option<InstantaneReglages>>,
     signature_ecrans: Cell<String>,
     signature_participants: Cell<String>,
     signature_intervalle: Cell<u64>,
@@ -195,7 +197,7 @@ pub struct Panneau {
 }
 
 impl Panneau {
-    pub fn nouveau(mtm: MainThreadMarker, cible: &NSObject, etat: &Etat) -> Self {
+    pub(crate) fn nouveau(mtm: MainThreadMarker, cible: &NSObject) -> Self {
         let fenetre = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
                 NSWindow::alloc(mtm),
@@ -538,27 +540,37 @@ impl Panneau {
             avif_capacites,
             avif_cache,
             avif_ouvrir,
+            actualisation_en_cours: Cell::new(false),
+            actualisation_attente: RefCell::new(None),
             signature_ecrans: Cell::new(String::new()),
             signature_participants: Cell::new(String::new()),
             signature_intervalle: Cell::new(u64::MAX),
             signature_favoris: Cell::new(String::new()),
             signature_associations: Cell::new(String::new()),
         };
-        panneau.actualiser(etat);
         panneau
     }
 
     /// Relit l'etat et met les controles a jour. N'ecrit jamais les reglages
     /// et n'appelle aucune action (les `setState` programmatiques n'en
     /// declenchent pas).
-    pub fn actualiser(&self, etat: &Etat) {
-        self.actualiser_ecrans(etat);
-        self.actualiser_diaporama(etat);
-        self.actualiser_dossiers(etat);
-        self.actualiser_avif();
+    pub(crate) fn actualiser(&self, etat: &InstantaneReglages) {
+        *self.actualisation_attente.borrow_mut() = Some(etat.clone());
+        if self.actualisation_en_cours.replace(true) { return; }
+        // Une notification synchrone peut demander un nouvel affichage. La derniere
+        // demande est rejouee apres la passe courante, sans emprunt RefCell actif.
+        loop {
+            let prochain = self.actualisation_attente.borrow_mut().take();
+            let Some(etat) = prochain else { break; };
+            self.actualiser_ecrans(&etat);
+            self.actualiser_diaporama(&etat);
+            self.actualiser_dossiers(&etat);
+            self.actualiser_avif();
+        }
+        self.actualisation_en_cours.set(false);
     }
 
-    fn actualiser_ecrans(&self, etat: &Etat) {
+    fn actualiser_ecrans(&self, etat: &InstantaneReglages) {
         let signature = etat
             .ecrans
             .iter()
@@ -606,7 +618,7 @@ impl Panneau {
         });
     }
 
-    fn reconstruire_ecrans(&self, etat: &Etat) {
+    fn reconstruire_ecrans(&self, etat: &InstantaneReglages) {
         let mtm = MainThreadMarker::new().expect("panneau sur le fil principal");
         self.ecrans.removeAllItems();
         if etat.ecrans.is_empty() {
@@ -632,7 +644,7 @@ impl Panneau {
         }
     }
 
-    fn actualiser_diaporama(&self, etat: &Etat) {
+    fn actualiser_diaporama(&self, etat: &InstantaneReglages) {
         // Compteur de la bonne liste et etat de lecture.
         let compteur = etat
             .reglages
@@ -651,7 +663,7 @@ impl Panneau {
                 "paused"
             }
         )));
-        let plan_vide = etat.plan_diaporama().is_empty();
+        let plan_vide = etat.plan_vide;
         self.demarrer
             .setTitle(&NSString::from_str(if etat.diaporama_actif {
                 "Pause"
@@ -735,7 +747,7 @@ impl Panneau {
         }
     }
 
-    fn reconstruire_participants(&self, etat: &Etat) {
+    fn reconstruire_participants(&self, etat: &InstantaneReglages) {
         let mtm = MainThreadMarker::new().expect("panneau sur le fil principal");
         // Les anciens boutons sont detaches avant d'etre remplaces.
         for sous_vue in self.participants_vue.subviews().iter() {
@@ -771,7 +783,7 @@ impl Panneau {
         *self.participants.borrow_mut() = boutons;
     }
 
-    fn actualiser_dossiers(&self, etat: &Etat) {
+    fn actualiser_dossiers(&self, etat: &InstantaneReglages) {
         let chemin = etat.dossier.to_string_lossy().into_owned();
         self.dossier_courant
             .setStringValue(&NSString::from_str(&chemin));
@@ -841,7 +853,7 @@ impl Panneau {
         }
     }
 
-    fn reconstruire_favoris(&self, etat: &Etat) {
+    fn reconstruire_favoris(&self, etat: &InstantaneReglages) {
         let mtm = MainThreadMarker::new().expect("panneau sur le fil principal");
         self.favoris.removeAllItems();
         let Some(menu) = self.favoris.menu() else { return; };
@@ -862,7 +874,7 @@ impl Panneau {
         }
     }
 
-    fn reconstruire_associations(&self, etat: &Etat) {
+    fn reconstruire_associations(&self, etat: &InstantaneReglages) {
         let mtm = MainThreadMarker::new().expect("panneau sur le fil principal");
         for sous_vue in self.associations_vue.subviews().iter() {
             sous_vue.removeFromSuperview();

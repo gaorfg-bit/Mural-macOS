@@ -16,6 +16,9 @@ static VERROU: Mutex<()> = Mutex::new(());
 
 /// Emplacement du journal.
 pub fn chemin() -> Option<PathBuf> {
+    if let Some(chemin) = std::env::var_os("MURAL_JOURNAL").filter(|p| !p.is_empty()) {
+        return Some(PathBuf::from(chemin));
+    }
     let home = std::env::var("HOME").ok()?;
     Some(
         PathBuf::from(home)

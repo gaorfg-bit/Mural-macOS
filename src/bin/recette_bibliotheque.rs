@@ -192,6 +192,13 @@ fn element(menu: &NSMenu, index: isize) -> Retained<NSMenuItem> {
         .unwrap_or_else(|| panic!("element {index} absent de {}", menu.title()))
 }
 
+fn commande(menu: &NSMenu, action: objc2::runtime::Sel) -> Retained<NSMenuItem> {
+    let commandes: Vec<_> = menu.itemArray().iter()
+        .filter(|item| item.action() == Some(action)).collect();
+    assert_eq!(commandes.len(), 1, "commande {action:?} absente ou dupliquee");
+    commandes.into_iter().next().unwrap()
+}
+
 fn represente(item: &NSMenuItem) -> Option<PathBuf> {
     item.representedObject()
         .and_then(|objet| objet.downcast_ref::<NSString>().map(|s| PathBuf::from(s.to_string())))
@@ -393,8 +400,8 @@ fn mode_panneau(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
         }
     }
     let menu = ouvrir_menu(&cible, &bouton_menu, &observateur);
-    assert_eq!(menu.numberOfItems(), 14);
-    let settings_item = element(&menu, 12);
+    assert_eq!(menu.numberOfItems(), 13);
+    let settings_item = commande(&menu, objc2::sel!(ouvrirReglages:));
     assert_eq!(titre(&settings_item), "Settings…");
     verifier_action(&settings_item, objc2::sel!(ouvrirReglages:), cible_ptr);
 
@@ -1005,15 +1012,15 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
 
     // 1. Ouverture initiale : structure, états vides, aucune cible.
     let m1 = ouvrir_menu(&cible, &bouton, &observateur);
-    assert_eq!(m1.numberOfItems(), 14, "menu « … » incomplet");
-    assert_eq!(titre(&element(&m1, 11)), "AVIF cache…");
-    verifier_action(&element(&m1, 11), objc2::sel!(cacheAvif:), cible_ptr);
+    assert_eq!(m1.numberOfItems(), 13, "menu « … » incomplet");
+    assert_eq!(titre(&commande(&m1, objc2::sel!(cacheAvif:))), "AVIF cache…");
+    verifier_action(&commande(&m1, objc2::sel!(cacheAvif:)), objc2::sel!(cacheAvif:), cible_ptr);
     assert_eq!(
-        titre(&element(&m1, 12)),
+        titre(&commande(&m1, objc2::sel!(ouvrirReglages:))),
         "Settings…",
-        "Settings… conserve son emplacement"
+        "commande Settings… absente"
     );
-    verifier_action(&element(&m1, 12), objc2::sel!(ouvrirReglages:), cible_ptr);
+    verifier_action(&commande(&m1, objc2::sel!(ouvrirReglages:)), objc2::sel!(ouvrirReglages:), cible_ptr);
     let zero = element(&m1, 0);
     assert_eq!(titre(&zero), "Same image on all displays");
     verifier_action(&zero, objc2::sel!(memeImagePartout:), cible_ptr);
@@ -1390,7 +1397,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     let mut ancien_element = Some(m6.itemAtIndex(0).expect("element initial"));
     for tour in 0..4 {
         let menu = ouvrir_menu(&cible, &bouton, &observateur);
-        assert_eq!(menu.numberOfItems(), 14, "menu instable au tour {tour}");
+        assert_eq!(menu.numberOfItems(), 13, "menu instable au tour {tour}");
         assert_eq!(titre(&element(&menu, 0)), "Same image on all displays");
         assert_eq!(sous_menu(&element(&menu, 6), "Favorite folders").numberOfItems(), 3);
         if let Some(ancien) = &ancien_element {
@@ -1476,7 +1483,12 @@ fn main() {
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
     app.finishLaunching();
-    app.activate();
+    if app.respondsToSelector(objc2::sel!(activate)) {
+        app.activate();
+    } else {
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(false);
+    }
     if std::env::args().any(|a| a == "--panneau") {
         std::thread::spawn(|| {
             std::thread::sleep(Duration::from_secs(120));

@@ -397,12 +397,32 @@ pub fn charger() -> Reglages {
     }
 }
 
-/// Lit un fichier de reglages (sans ecriture), utilisé par `charger`.
+/// Lit un fichier de reglages sans le modifier. Une absence seule autorise
+/// les valeurs par defaut ; les autres erreurs sont journalisees.
 pub fn charger_depuis(chemin: &Path) -> Reglages {
-    match fs::read_to_string(chemin) {
-        Ok(texte) => lire_texte(&texte),
-        Err(_) => Reglages::default(),
+    match essayer_charger_depuis(chemin) {
+        Ok(reglages) => reglages,
+        Err(erreur) => {
+            crate::journal::erreur(&format!("Settings could not be read: {erreur}. Original file preserved: {}", chemin.display()));
+            Reglages::default()
+        }
     }
+}
+
+/// Lecture stricte : distingue absence, erreur d'acces et JSON inutilisable.
+pub fn essayer_charger_depuis(chemin: &Path) -> std::io::Result<Reglages> {
+    let texte = match fs::read_to_string(chemin) {
+        Ok(texte) => texte,
+        Err(erreur) if erreur.kind() == std::io::ErrorKind::NotFound => return Ok(Reglages::default()),
+        Err(erreur) => return Err(erreur),
+    };
+    let valeur: Value = serde_json::from_str(&texte)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    if !valeur.is_object() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Settings must contain a JSON object"));
+    }
+    serde_json::from_value(valeur)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 /// Lit le JSON de reglages, y compris l'ancien schema Swift/Linux. Un JSON
@@ -422,6 +442,9 @@ pub fn sauvegarder(reglages: &Reglages) -> std::io::Result<()> {
 /// Ecrit les reglages a l'emplacement donne (utilisé par `sauvegarder` et par
 /// les tests sous `/private/tmp`).
 pub fn sauvegarder_vers(chemin: &Path, reglages: &Reglages) -> std::io::Result<()> {
+    // Ne jamais remplacer par des valeurs par defaut un fichier que l'on ne
+    // sait pas lire, y compris s'il a ete corrompu depuis le demarrage.
+    essayer_charger_depuis(chemin)?;
     if let Some(parent) = chemin.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -470,10 +493,17 @@ pub fn table_correspondances(
 /// Charge les reglages puis remappe les anciens identifiants d'ecran avec la
 /// table des ecrans connectes. N'ecrit jamais le fichier.
 pub fn charger_avec_ecrans(ecrans: &[crate::ecrans::Ecran]) -> Reglages {
-    match chemin_fichier() {
-        Some(chemin) => charger_fichier_avec_ecrans(&chemin, ecrans),
+    essayer_charger_avec_ecrans(ecrans).unwrap_or_default()
+}
+
+/// Meme remappage, en conservant l'erreur pour l'interface.
+pub fn essayer_charger_avec_ecrans(ecrans: &[crate::ecrans::Ecran]) -> std::io::Result<Reglages> {
+    let mut reglages = match chemin_fichier() {
+        Some(chemin) => essayer_charger_depuis(&chemin)?,
         None => Reglages::default(),
-    }
+    };
+    remapper_ecrans(&mut reglages, &table_correspondances(ecrans));
+    Ok(reglages)
 }
 
 /// Variante de `charger_avec_ecrans` a partir d'un chemin explicite.

@@ -28,6 +28,7 @@ ENTREES=(
   "$NOM/Makefile"
   "$NOM/README.md"
   "$NOM/src"
+  "$NOM/tests"
   "$NOM/Ressources"
   "$NOM/scripts/valider.sh"
   "$NOM/scripts/distribuer-beta.sh"

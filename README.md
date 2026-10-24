@@ -63,8 +63,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh</code></pre>
 
 <pre><code>git clone https://github.com/gaorfg-bit/Mural-macOS
 cd Mural-macOS
+make sparkle
 make bundle OFFLINE= SIGN=-
 open Mural.app</code></pre>
+
+<p>Rust 1.88 or later is required. Tests are verified with Rust 1.88.0 and 1.98.1.</p>
 
 <p><em><code>OFFLINE=</code> lets Cargo fetch its dependencies on a fresh machine;
 <code>SIGN=-</code> uses an ad-hoc signature when no local signing identity is installed.</em></p>
