@@ -57,6 +57,11 @@ rm -rf Mural.app   # source build only</code></pre>
   <li>Native AppKit interface, no Electron</li>
 </ul>
 
+<h2>Formats</h2>
+
+<p>PNG, JPEG, BMP and WebP. AVIF is read natively when macOS ImageIO provides the decoder.
+The optional AVIF conversion writes a lossy copy to the app cache and never modifies the original.</p>
+
 <hr>
 
 <p align="center">
@@ -65,7 +70,7 @@ rm -rf Mural.app   # source build only</code></pre>
 
 <hr>
 
-<p>macOS 13 or later, Intel or Apple silicon.</p>
+<p>macOS 13 or later. The signed 0.1.0 build is Apple silicon only.</p>
 
 <p>Your images, settings, caches and logs stay on your Mac — see <a href="PRIVACY.md">PRIVACY.md</a>.</p>
 
