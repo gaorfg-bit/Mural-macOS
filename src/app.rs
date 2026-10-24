@@ -2957,7 +2957,13 @@ pub fn lancer(mtm: MainThreadMarker, dossier: PathBuf) {
     let (_fenetre, _etat) = objc2::rc::autoreleasepool(|_| construire(mtm, dossier, true));
     crate::mises_a_jour::demarrer(mtm);
     unsafe {
-        application.activate();
+        // `activate` n'est disponible qu'a partir de macOS 14.
+        if application.respondsToSelector(sel!(activate)) {
+            application.activate();
+        } else {
+            #[allow(deprecated)]
+            application.activateIgnoringOtherApps(false);
+        }
         application.run();
     }
 }
