@@ -3,7 +3,7 @@
 //!   apercu bord a bord redimensionnable (double-clic : image entiere)
 //!   galerie opaque, sans barre d'etat permanente
 //!   commandes et dossiers flottants reveles aux bords
-//!   matiere Flat ou NSGlassEffectView native, selon le choix utilisateur
+//!   NSGlassEffectView native, avec materiau AppKit de repli
 //!
 //! Tout ce qui compte est journalise (voir `journal`) : chaque action, chaque
 //! erreur Apple, et l'etat de la galerie au chargement.
@@ -999,16 +999,6 @@ define_class!(
             if let Some(vue) = self.ivars().details.borrow().as_ref() { vue.setHidden(!vue.isHidden()); }
         }
 
-        #[unsafe(method(basculerMatiere:))]
-        fn basculer_matiere(&self, expediteur: &NSMenuItem) {
-            let etat = unsafe { &mut *self.ivars().etat };
-            let verre = expediteur.tag() == 1;
-            etat.reglages.champs_inconnus.insert("interface_verre".into(), serde_json::json!(verre));
-            etat.enregistrer();
-            if let Some(surface) = self.ivars().surface.borrow().as_ref() { surface.matiere(verre); }
-            self.actualiser_menu();
-        }
-
         #[unsafe(method(ciblerRecherche:))]
         fn cibler_recherche(&self, _expediteur: Option<&NSObject>) {
             let ivars = self.ivars();
@@ -1894,17 +1884,7 @@ impl Cible {
             "",
             None,
         ));
-        let apparence = self.element_menu("Appearance", None, "", None);
-        let choix = NSMenu::new(MainThreadMarker::new().expect("menu sur fil principal"));
-        let verre = etat.reglages.champs_inconnus.get("interface_verre").and_then(|v| v.as_bool()).unwrap_or(true);
-        for (titre, tag) in [("Flat", 0), ("Liquid Glass", 1)] {
-            let element = self.element_menu(titre, Some(sel!(basculerMatiere:)), "", None);
-            element.setTag(tag);
-            element.setState(if (tag == 1) == verre { 1 } else { 0 });
-            choix.addItem(&element);
-        }
-        apparence.setSubmenu(Some(&choix));
-        menu.addItem(&apparence);
+
     }
 
     fn installer_menu_principal(&self) {
@@ -1919,6 +1899,7 @@ impl Cible {
             ",",
             None,
         ));
+        crate::mises_a_jour::installer(&sous_menu, mtm);
         sous_menu.addItem(&NSMenuItem::separatorItem(mtm));
         let quitter = self.element_menu("Quit Mural", Some(sel!(terminate:)), "q", None);
         unsafe {
@@ -2820,12 +2801,10 @@ pub fn construire(
             &cible, sel!(fenetreRedimensionnee:),
             Some(objc2_app_kit::NSSplitViewDidResizeSubviewsNotification), Some(&separation));
     }
-    let verre = unsafe { &*etat }.reglages.champs_inconnus.get("interface_verre")
-        .and_then(|v| v.as_bool()).unwrap_or(true);
     let largeur_outils = (largeur_segments + 416.0).max(500.0);
     let hauteur_surface = contenu.bounds().size.height;
     let cadre_outils = NSRect::new(NSPoint::new((largeur-largeur_outils)/2.0, hauteur_surface-54.0), NSSize::new(largeur_outils, 42.0));
-    let outils = interface::panneau(mtm, cadre_outils, verre);
+    let outils = interface::panneau(mtm, cadre_outils);
     outils.setAutoresizingMask(NSAutoresizingMaskOptions::ViewMinXMargin | NSAutoresizingMaskOptions::ViewMaxXMargin | NSAutoresizingMaskOptions::ViewMinYMargin);
     barre.removeFromSuperview();
     barre.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
@@ -2848,7 +2827,7 @@ pub fn construire(
     barre.addSubview(&details_bouton);
 
     let dossiers = interface::panneau(mtm,
-        NSRect::new(NSPoint::new(8.0, hauteur_surface-176.0), NSSize::new(184.0, 112.0)), verre);
+        NSRect::new(NSPoint::new(8.0, hauteur_surface-176.0), NSSize::new(184.0, 112.0)));
     dossiers.setAutoresizingMask(NSAutoresizingMaskOptions::ViewMinYMargin);
     let dossiers_contenu = NSView::new(mtm);
     interface::remplir(&dossiers, &dossiers_contenu);
@@ -2862,7 +2841,7 @@ pub fn construire(
     }
     contenu.addSubview(&dossiers);
     let details = interface::panneau(mtm,
-        NSRect::new(NSPoint::new(largeur-382.0, 12.0), NSSize::new(370.0,88.0)), false);
+        NSRect::new(NSPoint::new(largeur-382.0, 12.0), NSSize::new(370.0,88.0)));
     details.setAutoresizingMask(NSAutoresizingMaskOptions::ViewMinXMargin);
     let details_contenu = NSView::new(mtm);
     interface::remplir(&details, &details_contenu);
@@ -2976,6 +2955,7 @@ pub fn lancer(mtm: MainThreadMarker, dossier: PathBuf) {
         application.setActivationPolicy(NSApplicationActivationPolicy::Regular);
     }
     let (_fenetre, _etat) = objc2::rc::autoreleasepool(|_| construire(mtm, dossier, true));
+    crate::mises_a_jour::demarrer(mtm);
     unsafe {
         application.activate();
         application.run();

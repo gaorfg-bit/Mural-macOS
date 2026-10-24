@@ -174,28 +174,6 @@ impl Racine {
         *self.ivars().dossiers.borrow_mut() = Some(dossiers.retain());
         self.masquer();
     }
-    pub fn matiere(&self, verre: bool) {
-        for cellule in [&self.ivars().outils, &self.ivars().dossiers] {
-            let ancienne = cellule.borrow_mut().take();
-            if let Some(ancienne) = ancienne {
-                let nouvelle = panneau(self.mtm(), ancienne.frame(), verre);
-                nouvelle.setAutoresizingMask(ancienne.autoresizingMask());
-                let contenu: Option<Retained<NSView>> = if est_verre(&ancienne) {
-                    unsafe { msg_send![&*ancienne, contentView] }
-                } else {
-                    ancienne.subviews().firstObject()
-                };
-                if let Some(contenu) = contenu {
-                    contenu.removeFromSuperview();
-                    remplir(&nouvelle, &contenu);
-                }
-                nouvelle.setHidden(ancienne.isHidden());
-                ancienne.removeFromSuperview();
-                self.addSubview(&nouvelle);
-                *cellule.borrow_mut() = Some(nouvelle);
-            }
-        }
-    }
     pub fn reveler(&self) {
         self.boutons_fenetre(false);
         if let Some(v) = self.ivars().outils.borrow().as_ref() {
@@ -226,33 +204,20 @@ impl Racine {
 }
 
 /// NSGlassEffectView sur macOS 26 ; materiau AppKit de repli auparavant.
-/// Le choix Flat emploie une surface opaque, conforme a l'apparence systeme.
-pub fn panneau(mtm: MainThreadMarker, cadre: NSRect, verre: bool) -> Retained<NSView> {
-    if verre {
-        if let Some(classe) = AnyClass::get(c"NSGlassEffectView") {
-            let vue: Retained<NSView> = unsafe {
-                let objet: objc2::rc::Allocated<NSView> = msg_send![classe, alloc];
-                msg_send![objet, initWithFrame: cadre]
-            };
-            return vue;
-        }
-        let effet = NSVisualEffectView::new(mtm);
-        effet.setFrame(cadre);
-        unsafe {
-            effet.setMaterial(NSVisualEffectMaterial::Popover);
-            effet.setBlendingMode(NSVisualEffectBlendingMode::WithinWindow);
-            effet.setState(NSVisualEffectState::FollowsWindowActiveState);
-        }
-        return Retained::into_super(effet);
+pub fn panneau(mtm: MainThreadMarker, cadre: NSRect) -> Retained<NSView> {
+    if let Some(classe) = AnyClass::get(c"NSGlassEffectView") {
+        let vue: Retained<NSView> = unsafe {
+            let objet: objc2::rc::Allocated<NSView> = msg_send![classe, alloc];
+            msg_send![objet, initWithFrame: cadre]
+        };
+        return vue;
     }
-    let vue = NSView::new(mtm);
-    vue.setFrame(cadre);
-    vue.setWantsLayer(true);
-    if let Some(couche) = vue.layer() {
-        couche.setBackgroundColor(Some(&NSColor::windowBackgroundColor().CGColor()));
-        couche.setCornerRadius(10.0);
-    }
-    vue
+    let effet = NSVisualEffectView::new(mtm);
+    effet.setFrame(cadre);
+    effet.setMaterial(NSVisualEffectMaterial::Popover);
+    effet.setBlendingMode(NSVisualEffectBlendingMode::WithinWindow);
+    effet.setState(NSVisualEffectState::FollowsWindowActiveState);
+    Retained::into_super(effet)
 }
 
 fn est_verre(vue: &NSView) -> bool {

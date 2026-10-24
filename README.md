@@ -81,3 +81,13 @@ rm -rf Mural.app   # source build only</code></pre>
 <p>Your images, settings, caches and logs stay on your Mac — see <a href="PRIVACY.md">PRIVACY.md</a>.</p>
 
 <p>GPL-3.0 — © 2026 GaoR</p>
+
+## Updates
+
+Starting with 0.1.1, Mural checks for updates daily using Sparkle and offers to install them.
+Use **Mural → Check for Updates…** for a manual check. Update archives are signed.
+The existing 0.1.0 needs one manual upgrade to gain the built-in updater.
+
+For a source build, run `make sparkle` once to download and verify Sparkle 2.10.0,
+then `make bundle`. Cargo builds and subsequent bundle builds remain offline.
+See [update distribution](docs/MISES-A-JOUR.md) for release preparation.

@@ -22,3 +22,5 @@ pub mod reglages_panneau;
 pub mod suivi;
 
 pub mod diaporama;
+
+mod mises_a_jour;

@@ -1,7 +1,7 @@
 # Privacy notice — Mural for macOS
 
 Last reviewed: 24 October 2026  
-Scope: Mural macOS 0.1.0 in this source tree. This notice describes the application code reviewed for the pilot; review it again for every release.
+Scope: Mural macOS 0.1.1 in this source tree. This notice describes the application code reviewed for the pilot; review it again for every release.
 
 ## Data handled on your Mac
 
@@ -15,7 +15,7 @@ Mural uses macOS to apply a wallpaper to the display you choose and to open loca
 
 ## Network and third parties
 
-The Mural 0.1.0 application source reviewed for this notice contains no analytics, advertising, account service, telemetry, or application code that uploads your library, settings, logs, or images. Its declared Rust dependencies do not include a networking client. macOS diagnostics or network activity by other software on your Mac are outside Mural's control.
+The Mural 0.1.1 application source reviewed for this notice contains no analytics, advertising, account service, telemetry, or application code that uploads your library, settings, logs, or images. Sparkle 2 checks for updates daily over HTTPS on GitHub (gaorfg-bit/homebrew-mural) and downloads an update when you request installation. GitHub receives standard connection information such as your IP address and the update request. System profiling is disabled. No library paths, images, favorites, or diagnostic logs are sent by this update integration. Update preferences are stored by Sparkle in macOS user defaults. macOS diagnostics or network activity by other software on your Mac are outside Mural's control.
 
 The optional Ko-fi link is provided on the project README, not embedded in the desktop app. Opening it takes you to Ko-fi in your browser; Ko-fi's own privacy terms then apply. Supporting the project is optional and is not required to use Mural.
 

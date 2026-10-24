@@ -4,7 +4,7 @@ CONTENTS := $(APP)/Contents
 SIGN     := SnapLayout Dev
 OFFLINE  ?= --offline
 
-.PHONY: all build bundle run clean
+.PHONY: all build bundle run clean sparkle
 
 all: bundle
 
@@ -17,6 +17,7 @@ bundle: build
 	cp Ressources/icones/mural.icns "$(CONTENTS)/Resources/mural.icns"
 	cp LICENSE NOTICE.md "$(CONTENTS)/Resources/"
 	cp "$(BINARY)" "$(CONTENTS)/MacOS/mural"
+	./scripts/embarquer-sparkle.sh "$(APP)" "$(SIGN)"
 	codesign --force --sign "$(SIGN)" "$(APP)"
 	@echo "Built $(APP)"
 
@@ -26,3 +27,7 @@ run: bundle
 clean:
 	cargo clean
 	rm -rf "$(APP)"
+
+# Telechargement explicite de la dependance (une seule fois).
+sparkle:
+	./scripts/preparer-sparkle.sh

@@ -10,3 +10,9 @@ Licensed under GPL-3.0; the full text is in LICENSE.
 - Ressources/icones/mural.icns: macOS icon generated from the original assets.
 - assets/logo.png: Mural wordmark.
 - assets/Mural.png: screenshot of the macOS application.
+
+## Sparkle
+
+Sparkle 2.10.0 — https://sparkle-project.org — MIT license.
+The complete upstream license and third-party notices are included as
+`Contents/Resources/Sparkle-LICENSE.txt` in the application bundle.

@@ -1,14 +1,8 @@
 //! Recette native de composition. Aucun appel aux actions de fond d'ecran.
-use objc2::{MainThreadMarker, Message, msg_send};
-use objc2_app_kit::{NSApplication, NSButton, NSMenuItem, NSSplitView, NSView};
-use objc2_foundation::{NSObjectProtocol, NSSize};
-fn compter(vue: &NSView) -> usize {
-    vue.subviews().iter().map(|v| compter(&v)).sum::<usize>()
-        + usize::from(
-            vue.downcast_ref::<NSButton>()
-                .is_some_and(|b| b.action().is_some()),
-        )
-}
+use objc2::{MainThreadMarker, runtime::AnyClass};
+use objc2_foundation::NSObjectProtocol;
+use objc2_app_kit::{NSApplication, NSSplitView, NSVisualEffectView};
+use objc2_foundation::NSSize;
 fn main() {
     assert!(
         std::env::var("MURAL_REGLAGES").is_ok(),
@@ -19,7 +13,7 @@ fn main() {
     let dossier = std::env::args()
         .nth(1)
         .unwrap_or("maquettes/mural-v1/assets".into());
-    let (fenetre, etat) = mural::app::construire(mtm, dossier.into(), false);
+    let (fenetre, _etat) = mural::app::construire(mtm, dossier.into(), false);
     let racine = fenetre.contentView().unwrap();
     assert!(racine.class().to_string().contains("MuralSurface"));
     let enfants = racine.subviews();
@@ -48,36 +42,15 @@ fn main() {
         (avant - apres).abs() < 0.01,
         "proportion d'apercu perdue au redimensionnement"
     );
-    let adresse = *unsafe { &*etat }.cellules.keys().next().unwrap();
-    let cible = unsafe { &*(adresse as *const NSButton) }.target().unwrap();
-    let elements_avant = compter(&racine);
-    for tag in [0, 1, 0, 1] {
-        let expediteur = NSMenuItem::new(mtm);
-        expediteur.setTag(tag);
-        unsafe {
-            let _: () = msg_send![&*cible, basculerMatiere: &*expediteur];
-        }
-        assert_eq!(
-            unsafe { &*etat }.reglages.champs_inconnus["interface_verre"].as_bool(),
-            Some(tag == 1)
-        );
-        // Les enveloppes internes de NSGlassEffectView different, les boutons restent presents.
-        assert_eq!(
-            compter(&racine),
-            elements_avant,
-            "commande perdue au changement de matiere"
-        );
-        assert_eq!(
-            racine.subviews().count(),
-            4,
-            "panneaux accumules au changement d'apparence"
+    for index in 1..4 {
+        let panneau = enfants.objectAtIndex(index);
+        assert!(
+            AnyClass::get(c"NSGlassEffectView").is_some_and(|classe| panneau.isKindOfClass(classe))
+                || panneau.downcast_ref::<NSVisualEffectView>().is_some(),
+            "chaque panneau doit utiliser Glass, meme avec un ancien reglage Flat"
         );
     }
-    assert_eq!(
-        mural::preferences::charger().champs_inconnus["interface_verre"].as_bool(),
-        Some(true)
-    );
     println!(
-        "OK : panneaux caches, apercu borne et redimensionnable, proportions conservees, Flat/Glass alterne et persiste ; aucun fond applique"
+        "OK : panneaux caches, apercu borne et redimensionnable, proportions conservees, Glass uniquement ; aucun fond applique"
     );
 }
