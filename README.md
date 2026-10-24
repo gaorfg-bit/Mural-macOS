@@ -11,7 +11,37 @@
 <a href='https://ko-fi.com/M4M51RKN7V' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
 </p>
 
-<h1>Install</h2>
+<p>Mural is a local-first wallpaper library: point it at a folder, browse and preview your
+images, keep favorites, and organize a slideshow for each display. It never modifies,
+moves or deletes your files.</p>
+
+<hr>
+
+<h2>Features</h2>
+
+<ul>
+  <li>Independent wallpaper per display</li>
+  <li>No overwriting — your images are never modified, moved or deleted</li>
+  <li>Library with search, sort, preview and folder favorites</li>
+  <li>Slideshow mode with per-display image selections</li>
+  <li>Optional AVIF reading and conversion</li>
+  <li>Native AppKit interface, no Electron</li>
+</ul>
+
+<h2>Formats</h2>
+
+<p>PNG, JPEG, BMP and WebP. AVIF is read natively when macOS ImageIO provides the decoder.
+The optional AVIF conversion writes a lossy copy to the app cache and never modifies the original.</p>
+
+<hr>
+
+<p align="center">
+  <img src="assets/Mural.png" width="900" alt="Mural screenshot">
+</p>
+
+<hr>
+
+<h2>Install</h2>
 
 <p><strong>Homebrew</strong></p>
 
@@ -43,30 +73,6 @@ open Mural.app</code></pre>
 
 <pre><code>brew uninstall --cask mural-macos
 rm -rf Mural.app   # source build only</code></pre>
-
-<hr>
-
-<h2>Features</h2>
-
-<ul>
-  <li>Independent wallpaper per display</li>
-  <li>No overwriting — your images are never modified, moved or deleted</li>
-  <li>Library with search, sort, preview and folder favorites</li>
-  <li>Slideshow mode with per-display image selections</li>
-  <li>Optional AVIF reading and conversion</li>
-  <li>Native AppKit interface, no Electron</li>
-</ul>
-
-<h2>Formats</h2>
-
-<p>PNG, JPEG, BMP and WebP. AVIF is read natively when macOS ImageIO provides the decoder.
-The optional AVIF conversion writes a lossy copy to the app cache and never modifies the original.</p>
-
-<hr>
-
-<p align="center">
-  <img src="assets/Mural.png" width="900" alt="Mural screenshot">
-</p>
 
 <hr>
 
