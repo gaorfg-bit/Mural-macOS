@@ -1,24 +1,12 @@
-# Attribution et licence
+# Attribution and license
 
-Mural pour macOS est un **portage** de **Mural**, gestionnaire de fonds d'ecran
-GNOME : https://github.com/gaorfg-bit/Mural — © 2026 GaoR.
+Mural for macOS — © 2026 GaoR.
+Licensed under GPL-3.0; the full text is in LICENSE.
 
-Le code de ce depot est original (Swift), mais il **derive** de l'application
-GNOME : comportements, noms de fonctions equivalents, libelles et structure de
-l'interface sont repris de `mural/app.py`, `wallpaper_ops.py`, `thumbnails.py`,
-`config.py`, `monitors.py` et `slideshow.py`.
+## Assets
 
-En consequence, ce depot est distribue sous **GPL-3.0** (voir `LICENSE`, copie
-du fichier de licence du projet d'origine). Toute redistribution doit conserver
-cette licence et l'attribution ci-dessus.
-
-## Ressources reprises telles quelles
-
-| Ressource | Origine | Licence |
-| --- | --- | --- |
-| `LICENSE` | depot Mural | GPL-3.0 |
-| `Ressources/icones/mural.svg` | `mural/data/icons/io.github.gaorfgbit.Mural.svg` | GPL-3.0 |
-| `Ressources/icones/mural.png` | `mural/data/icons/io.github.gaorfg-bit.Mural.png` | GPL-3.0 |
-
-La **capture d'ecran** du depot d'origine (`assets/Mural.png`, `assets/mural-app.png`)
-n'est **pas** reprise ici.
+- Ressources/icones/mural.svg: original Mural vector icon.
+- Ressources/icones/mural.png: original Mural raster icon.
+- Ressources/icones/mural.icns: macOS icon generated from the original assets.
+- assets/logo.png: Mural wordmark.
+- assets/Mural.png: screenshot of the macOS application.

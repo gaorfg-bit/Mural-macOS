@@ -1,9 +1,12 @@
-# Artefacts de compilation
-.build/
-*.app/
-
-# Rendus de verification (regenerables par `make render`)
-outils/rendu*.png
-
-# macOS
+/target/
+/Mural.app/
+/.relais-deepseek/
+/.impeccable/
+/outils/
+/maquettes/
+/tools/
+/docs/
+/AGENTS.md
+/rapport-rust-1.txt
 .DS_Store
+/scripts/

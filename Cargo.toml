@@ -1,0 +1,51 @@
+[package]
+name = "mural"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "mural"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mural"
+path = "src/main.rs"
+
+[[bin]]
+name = "sonde"
+path = "src/bin/sonde.rs"
+
+[[bin]]
+name = "rendu"
+path = "src/bin/rendu.rs"
+
+[[bin]]
+name = "mesure_cache"
+path = "src/bin/mesure_cache.rs"
+
+[dependencies]
+# API Apple natives (toutes deja presentes dans ~/.cargo de l'utilisateur)
+objc2 = "0.6.4"
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+# Vignettes et apercus : ImageIO decode DIRECTEMENT a l'echelle demandee
+# (CGImageSourceCreateThumbnailAtIndex), au lieu de decoder en pleine resolution.
+objc2-image-io = "0.3.2"
+# Contour de selection des vignettes (couches CALayer natives).
+objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
+# Sert uniquement a lire largeur x hauteur dans l'en-tete du fichier (0 ms,
+# aucun decodage) : la lecture des proprietes ImageIO demanderait beaucoup plus
+# de FFI pour le meme resultat.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "webp"] }
+# Reglages
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
