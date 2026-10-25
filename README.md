@@ -48,11 +48,11 @@ The optional AVIF conversion writes a lossy copy to the app cache and never modi
 <pre><code>brew install --cask gaorfg-bit/mural/mural-macos</code></pre>
 
 <p><em>Apple silicon; macOS 13 is the declared minimum, with compatibility on older
-macOS versions still being tested. The public 0.1.0 build is not notarized.
+macOS versions still being tested. Version 0.1.1 is a beta and is not notarized.
 If macOS blocks its first launch, read
 <a href="https://support.apple.com/102445">Apple’s instructions</a> before deciding
 whether to allow it in System Settings → Privacy &amp; Security → Open Anyway.
-The upcoming 0.1.1 beta is not published yet; use its own release notes when available.</em></p>
+Read the <a href="https://github.com/gaorfg-bit/homebrew-mural/releases/tag/v0.1.1">release notes and installation instructions</a> before trying the beta.</em></p>
 
 <p><strong>Build from source</strong></p>
 
