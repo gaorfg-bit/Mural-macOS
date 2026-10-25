@@ -27,6 +27,9 @@ ENTREES=(
   "$NOM/PRIVACY.md"
   "$NOM/Makefile"
   "$NOM/README.md"
+  "$NOM/assets/logo.png"
+  "$NOM/assets/Mural.png"
+  "$NOM/docs/MISES-A-JOUR.md"
   "$NOM/src"
   "$NOM/tests"
   "$NOM/Ressources"
@@ -40,7 +43,7 @@ ENTREES=(
   "$NOM/scripts/test-source-archive.sh"
 )
 
-tar -czf "$TEMP" -C "$PARENT" "${ENTREES[@]}"
+COPYFILE_DISABLE=1 tar -czf "$TEMP" -C "$PARENT" "${ENTREES[@]}"
 mv "$TEMP" "$ARCHIVE"
-shasum -a 256 "$ARCHIVE" > "$EMPREINTE"
+(cd "$DESTINATION" && shasum -a 256 "$(basename "$ARCHIVE")") > "$EMPREINTE"
 printf 'Archive source prete : %s\n' "$ARCHIVE"

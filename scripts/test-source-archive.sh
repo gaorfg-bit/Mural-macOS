@@ -11,9 +11,22 @@ trap 'rm -rf "$TEMP"' EXIT
 ARCHIVE="$TEMP/Mural-$VERSION-source.tar.gz"
 [[ -f "$ARCHIVE" ]]
 [[ -f "$ARCHIVE.sha256" ]]
+read -r empreinte nom_archive < "$ARCHIVE.sha256"
+if [[ "$nom_archive" != "Mural-$VERSION-source.tar.gz" ]]; then
+  printf 'Empreinte non portable : %s\n' "$nom_archive" >&2
+  exit 1
+fi
 
 LISTE="$TEMP/contenu.txt"
 tar -tzf "$ARCHIVE" > "$LISTE"
+python3 - "$ARCHIVE" <<'PYARCHIVE'
+import sys, tarfile
+with tarfile.open(sys.argv[1]) as archive:
+    for entree in archive.getmembers():
+        nom = entree.name.rsplit('/', 1)[-1]
+        assert not nom.startswith('._') and nom != '.DS_Store', \
+            f'Archive source contient des metadonnees Finder : {entree.name}'
+PYARCHIVE
 for chemin in \
   "$NOM/Cargo.toml" \
   "$NOM/Cargo.lock" \
@@ -22,6 +35,9 @@ for chemin in \
   "$NOM/NOTICE.md" \
   "$NOM/PRIVACY.md" \
   "$NOM/Makefile" \
+  "$NOM/assets/logo.png" \
+  "$NOM/assets/Mural.png" \
+  "$NOM/docs/MISES-A-JOUR.md" \
   "$NOM/src/" \
   "$NOM/tests/avif.rs" \
   "$NOM/tests/avif_conversion.rs" \
@@ -33,7 +49,7 @@ for chemin in \
   }
 done
 
-if rg -q "^${NOM}/(target|\\.git|docs|\\.codex)/" "$LISTE"; then
+if rg -q "^${NOM}/(target|\\.git|\\.codex)/" "$LISTE"; then
   printf '%s\n' 'Archive source contient des fichiers locaux ou de construction.' >&2
   exit 1
 fi

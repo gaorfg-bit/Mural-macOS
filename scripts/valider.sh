@@ -23,7 +23,7 @@ if rg 'TEST NON EXECUTE' "$preuves/cargo-test.log" > "$preuves/omissions-avif.tx
     printf 'NON VERIFIE : certains scenarios AVIF ne sont pas executes sur ce systeme (voir omissions-avif.txt).\n'
 fi
 printf '\n2/10 — Compilation des recettes\n'
-cargo build --offline --locked --bin recette_bibliotheque --bin recette_interface --bin recette_memoire --bin recette_activation --bin recette_reentrance 2>&1 | tee "$preuves/cargo-build.log"
+cargo build --offline --locked --bin recette_bibliotheque --bin recette_interface --bin recette_memoire --bin recette_activation --bin recette_reentrance --bin recette_apercu 2>&1 | tee "$preuves/cargo-build.log"
 printf '\n3/10 — Bibliotheque et restauration dans un second processus\n'
 "$projet/target/debug/recette_bibliotheque" 2>&1 | tee "$preuves/bibliotheque.log"
 "$projet/target/debug/recette_bibliotheque" --restauration 2>&1 | tee "$preuves/restauration.log"
@@ -38,6 +38,7 @@ MURAL_REGLAGES="$preuves/panneau/reglages.json" "$projet/target/debug/recette_bi
 printf '\n6/10 — Composition et galerie de 500 images\n'
 MURAL_REGLAGES="$preuves/interface/reglages.json" "$projet/target/debug/recette_interface" "$preuves/bibliotheque/Paysages" 2>&1 | tee "$preuves/interface.log"
 MURAL_REGLAGES="$preuves/memoire/reglages.json" "$projet/target/debug/recette_memoire" 2>&1 | tee "$preuves/memoire.log"
+MURAL_REGLAGES="$preuves/apercu/reglages.json" "$projet/target/debug/recette_apercu" 2>&1 | tee "$preuves/apercu.log"
 printf '\n7/10 — Activation ancienne et moderne\n'
 for mode in ancien moderne; do
     MURAL_REGLAGES="$preuves/activation-$mode/reglages.json" "$projet/target/debug/recette_activation" "$mode" 2>&1 | tee "$preuves/activation-$mode.log"

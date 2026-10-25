@@ -32,7 +32,51 @@ fn attendre(app: &NSApplication, secondes: f64) {
         });
     }
 }
+fn repos_sans_sondage(app: &NSApplication, secondes: f64) {
+    let fin = Instant::now() + Duration::from_secs_f64(secondes);
+    while let Some(reste) = fin.checked_duration_since(Instant::now()) {
+        if let Some(e) = app.nextEventMatchingMask_untilDate_inMode_dequeue(
+            NSEventMask::Any,
+            Some(&NSDate::dateWithTimeIntervalSinceNow(reste.as_secs_f64())),
+            unsafe { objc2_foundation::NSDefaultRunLoopMode },
+            true,
+        ) {
+            app.sendEvent(&e);
+        }
+        app.updateWindows();
+    }
+}
+fn stockage(phase: &str) {
+    let cache = mural::cache::dossier_defaut().unwrap();
+    let entrees: Vec<_> = std::fs::read_dir(cache)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .collect();
+    let octets: u64 = entrees.iter().map(|m| m.len()).sum();
+    let journal = mural::journal::chemin()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    println!(
+        "STOCKAGE {phase} cache_fichiers={} cache_octets={octets} journal_octets={journal}",
+        entrees.len()
+    );
+}
 fn main() {
+    let origine = Instant::now();
+    let profil = std::env::args().any(|a| a == "--profil");
+    if profil {
+        println!(
+            "PHASE generation t=0 epoch={:.6}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64()
+        );
+    }
     let base = std::env::var("MURAL_REGLAGES").expect("reglages isoles obligatoires");
     assert!(base.starts_with("/private/tmp/"));
     let base = std::path::Path::new(&base).parent().unwrap();
@@ -59,6 +103,12 @@ fn main() {
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
     app.finishLaunching();
+    if profil {
+        println!(
+            "PHASE construction t={:.3}",
+            origine.elapsed().as_secs_f64()
+        );
+    }
     let (fenetre, etat) =
         objc2::rc::autoreleasepool(|_| mural::app::construire(mtm, dossier, true));
     attendre(&app, 6.0);
@@ -78,8 +128,17 @@ fn main() {
         "les miniatures hors champ restent en memoire : {}",
         nombre()
     );
+    if profil {
+        stockage("avant_parcours");
+        println!("PHASE repos_debut t={:.3}", origine.elapsed().as_secs_f64());
+        repos_sans_sondage(&app, 20.0);
+        println!("PHASE repos_fin t={:.3}", origine.elapsed().as_secs_f64());
+    }
     let scroll = trouver(&fenetre.contentView().unwrap()).unwrap();
     let document = scroll.documentView().unwrap();
+    if profil {
+        println!("PHASE defilement t={:.3}", origine.elapsed().as_secs_f64());
+    }
     for y in [2000.0_f64, 6000.0, 12000.0, 0.0] {
         let y = y.min((document.frame().size.height - scroll.contentSize().height).max(0.0));
         objc2::rc::autoreleasepool(|_| {
@@ -117,6 +176,25 @@ fn main() {
     });
     attendre(&app, 1.0);
     assert!(nombre() < 100);
+    if profil {
+        println!(
+            "PHASE selections_rapides t={:.3}",
+            origine.elapsed().as_secs_f64()
+        );
+        for index in [0, 499, 250, 1, 400, 2, 0, 499, 250, 1, 400, 2] {
+            objc2::rc::autoreleasepool(|_| {
+                let adresse = unsafe { &*etat }
+                    .cellules
+                    .iter()
+                    .find(|(_, i)| **i == index)
+                    .map(|(a, _)| *a)
+                    .unwrap();
+                let bouton = unsafe { &*(adresse as *const NSButton) };
+                let _: () = unsafe { msg_send![&*cible, celluleCliquee: bouton] };
+            });
+        }
+        println!("PHASE filtrage t={:.3}", origine.elapsed().as_secs_f64());
+    }
     let champ = recherche(&fenetre.contentView().unwrap()).unwrap();
     for filtre in ["image-499", "absent", ""] {
         objc2::rc::autoreleasepool(|_| {
@@ -146,6 +224,9 @@ fn main() {
         "APRES PARCOURS\n{}",
         String::from_utf8_lossy(&mesure.stdout)
     );
+    if profil {
+        stockage("apres_parcours");
+    }
     fenetre.close();
     println!("OK : 500 images, chargement borne, defilement et retour sans image manquante");
 }

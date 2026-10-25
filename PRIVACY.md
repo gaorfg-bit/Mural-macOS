@@ -1,6 +1,6 @@
 # Privacy notice — Mural for macOS
 
-Last reviewed: 24 October 2026  
+Last reviewed: 25 October 2026
 Scope: Mural macOS 0.1.1 in this source tree. This notice describes the application code reviewed for the pilot; review it again for every release.
 
 ## Data handled on your Mac
@@ -21,4 +21,4 @@ The optional Ko-fi link is provided on the project README, not embedded in the d
 
 ## Questions
 
-For privacy questions or to report an issue, use the contact method listed on the project’s official distribution page. Before that page is available, do not send logs or personal file paths through public posts.
+For privacy questions or to report an issue, use the [official issue tracker](https://github.com/gaorfg-bit/homebrew-mural/issues/new). Issues are public: do not attach private images, unredacted logs, or personal file paths.

@@ -533,6 +533,34 @@ define_class!(
 // Cible des actions
 // ---------------------------------------------------------------------------
 
+/// Identite du fichier et du rendu, sans lecture des pixels.
+#[derive(Clone, PartialEq, Eq)]
+struct CleApercu {
+    chemin: PathBuf,
+    modification: std::time::SystemTime,
+    taille: u64,
+    identite_unix: (u64, u64, i64, i64),
+    cible: (u32, u32),
+}
+impl CleApercu {
+    fn lire(chemin: &std::path::Path, largeur: u32, hauteur: u32) -> Option<Self> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(chemin).ok()?;
+        if !meta.is_file() { return None; }
+        Some(Self {
+            chemin: std::fs::canonicalize(chemin).ok()?, modification: meta.modified().ok()?,
+            taille: meta.len(), identite_unix: (meta.dev(), meta.ino(), meta.ctime(), meta.ctime_nsec()),
+            cible: (largeur, hauteur),
+        })
+    }
+}
+
+struct ApercuMemoire {
+    cle: CleApercu,
+    image: Retained<NSImage>,
+    dimensions: String,
+}
+
 pub struct CibleIvars {
     avif_panneau: RefCell<Option<panneau_avif::Panneau>>,
     avif_tache: RefCell<Option<panneau_avif::Tache>>,
@@ -544,6 +572,7 @@ pub struct CibleIvars {
     surface: RefCell<Option<Retained<interface::Racine>>>,
     details: RefCell<Option<Retained<NSView>>>,
     apercu: Cell<*mut NSImageView>,
+    apercu_memoire: RefCell<Option<ApercuMemoire>>,
     etat_texte: Cell<*mut NSTextField>,
     nom_fichier: Cell<*mut NSTextField>,
     dimensions: Cell<*mut NSTextField>,
@@ -2014,6 +2043,7 @@ impl Cible {
             surface: RefCell::new(None),
             details: RefCell::new(None),
             apercu: Cell::new(std::ptr::null_mut()),
+            apercu_memoire: RefCell::new(None),
             etat_texte: Cell::new(std::ptr::null_mut()),
             nom_fichier: Cell::new(std::ptr::null_mut()),
             dimensions: Cell::new(std::ptr::null_mut()),
@@ -2271,6 +2301,38 @@ impl Cible {
         self.charger_zone_visible();
     }
 
+    /// Un seul apercu conserve : les options ne relancent pas ImageIO.
+    fn charger_apercu(&self, image: &Image, largeur: u32, hauteur: u32) -> (Option<Retained<NSImage>>, String) {
+        let cle = CleApercu::lire(&image.chemin, largeur, hauteur);
+        let reutilisable = self.ivars().apercu_memoire.borrow().as_ref()
+            .filter(|ancien| Some(&ancien.cle) == cle.as_ref())
+            .map(|ancien| (ancien.image.clone(), ancien.dimensions.clone()));
+        if let Some((image, dimensions)) = reutilisable { return (Some(image), dimensions); }
+        let ancien = self.ivars().apercu_memoire.borrow_mut().take();
+        drop(ancien);
+        // Aucun emprunt RefCell ni Etat pendant les appels natifs.
+        let debut = std::time::Instant::now();
+        let apercu = bibliotheque::apercu(&image.chemin, largeur, hauteur).map(|v| {
+            NSImage::initWithCGImage_size(NSImage::alloc(), &v.image,
+                NSSize { width: v.largeur as f64, height: v.hauteur as f64 })
+        });
+        if apercu.is_none() { journal::erreur(&format!("apercu impossible : {}", image.nom)); }
+        let dimensions = bibliotheque::dimensions(&image.chemin)
+            .map(|(l, h)| format!("{l} x {h} px")).unwrap_or_default();
+        let taille = bibliotheque::taille_lisible(std::fs::metadata(&image.chemin).ok().map(|m| m.len()));
+        let dimensions = if dimensions.is_empty() { taille } else { format!("{dimensions} · {taille}") };
+        journal::info(&format!("apercu de « {} » en {} ms", image.nom, debut.elapsed().as_millis()));
+        // Un fichier remplace pendant le decodage ne doit pas alimenter le cache.
+        if let (Some(cle), Some(apercu)) = (cle, apercu.as_ref()) {
+            if Some(&cle) == CleApercu::lire(&image.chemin, largeur, hauteur).as_ref() {
+                *self.ivars().apercu_memoire.borrow_mut() = Some(ApercuMemoire {
+                    cle, image: apercu.clone(), dimensions: dimensions.clone(),
+                });
+            }
+        }
+        (apercu, dimensions)
+    }
+
     /// Reapplique l'etat : apercu, informations, libelle du bouton, selection.
     fn rafraichir(&self) {
         let ivars = self.ivars();
@@ -2292,40 +2354,14 @@ impl Cible {
 
         let (apercu, nom, dims) = match image.as_ref() {
             Some(image) => {
-                let debut = std::time::Instant::now();
-                let apercu = unsafe {
-                    bibliotheque::apercu(&image.chemin, 1600, 780).map(|v| {
-                        let taille = NSSize {
-                            width: v.largeur as f64,
-                            height: v.hauteur as f64,
-                        };
-                        NSImage::initWithCGImage_size(NSImage::alloc(), &v.image, taille)
-                    })
-                };
-                if apercu.is_none() {
-                    journal::erreur(&format!("apercu impossible : {}", image.nom));
-                }
-                let dims = bibliotheque::dimensions(&image.chemin)
-                    .map(|(l, h)| format!("{l} x {h} px"))
-                    .unwrap_or_default();
-                let taille = bibliotheque::taille_lisible(std::fs::metadata(&image.chemin).ok().map(|m| m.len()));
-                let dims = if dims.is_empty() { taille } else { format!("{dims} · {taille}") };
-                journal::info(&format!(
-                    "apercu de « {} » en {} ms",
-                    image.nom,
-                    debut.elapsed().as_millis()
-                ));
-                (
-                    apercu,
-                    image.nom.clone(),
-                    dims,
-                )
+                let (apercu, dimensions) = self.charger_apercu(image, 1600, 780);
+                (apercu, image.nom.clone(), dimensions)
             }
-            None => (
-                None,
-                String::new(),
-                String::new(),
-            ),
+            None => {
+                let ancien = ivars.apercu_memoire.borrow_mut().take();
+                drop(ancien);
+                (None, String::new(), String::new())
+            }
         };
 
         if !ivars.favori.get().is_null() {
