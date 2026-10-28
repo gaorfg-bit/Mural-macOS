@@ -41,7 +41,7 @@ fn main() {
         unsafe { msg_send![&*moteur, feedURL] };
     assert_eq!(
         flux.absoluteString().unwrap().to_string(),
-        "https://github.com/gaorfg-bit/homebrew-mural/releases/latest/download/appcast.xml"
+        "https://mural-updates.mural-updates.workers.dev/appcast.xml"
     );
     assert!(NSBundle::mainBundle().bundleIdentifier().is_some());
     println!(

@@ -25,7 +25,7 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>SUFeedURL</key>
-    <string>https://github.com/gaorfg-bit/homebrew-mural/releases/latest/download/appcast.xml</string>
+    <string>https://mural-updates.mural-updates.workers.dev/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>1e4GSYKEd4DKzxs1bQ+k0nReLGnI5W4Q6hl17Z4lWd0=</string>
     <key>SUEnableAutomaticChecks</key>

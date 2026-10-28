@@ -9,7 +9,13 @@ Les choix ultérieurs de l'utilisateur sont conservés par Sparkle, sans écrase
 au lancement. Les images et les préférences JSON ne sont pas remplacées.
 
 Flux public stable :
-`https://github.com/gaorfg-bit/homebrew-mural/releases/latest/download/appcast.xml`
+`https://mural-updates.mural-updates.workers.dev/appcast.xml`
+
+Ce flux est servi par le Worker `mural-updates` (`~/Documents/Work/mural-updates`) :
+il compte la vérification (jour, version de l'app, version majeure de macOS) puis
+redirige en 302 vers l'asset `appcast.xml` de la release GitHub. Compteurs agrégés :
+`https://mural-updates.mural-updates.workers.dev/stats`. Aucune adresse IP ni
+identifiant n'est conservé.
 
 Le dépôt source peut rester privé : seuls le flux et les archives distribuées
 doivent être accessibles sans authentification. Ne jamais embarquer un jeton GitHub.
