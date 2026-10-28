@@ -35,9 +35,7 @@ The optional AVIF conversion writes a lossy copy to the app cache and never modi
 
 <hr>
 
-<p align="center">
-  <img src="assets/Mural.png" width="900" alt="Mural screenshot">
-</p>
+https://github.com/user-attachments/assets/3da52a0b-04a9-4d56-9e5b-abd66f01ace4
 
 <hr>
 
