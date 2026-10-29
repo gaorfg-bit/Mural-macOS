@@ -407,6 +407,11 @@ fn mode_panneau(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
 
     // Menu application : Settings… avec ⌘,.
     let principal = app.mainMenu().expect("menu principal");
+    let menu_mural = sous_menu(&element(&principal, 0), "Mural");
+    let version = menu_mural.itemArray().iter()
+        .find(|i| titre(i) == format!("Version {}", env!("CARGO_PKG_VERSION")))
+        .expect("version absente du menu Mural");
+    assert!(!version.isEnabled(), "la version est informative");
     // Les raccourcis texte doivent rester dans la chaine des repondeurs :
     // une cible Mural explicite empecherait le champ de recherche de coller.
     let edition = principal.itemArray().iter()

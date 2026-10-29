@@ -31,7 +31,7 @@ use objc2_app_kit::{
     NSWindowStyleMask, NSWorkspace,
 };
 use objc2_foundation::NSObjectProtocol;
-use objc2_foundation::{NSArray, NSObject, NSPoint, NSRect, NSSize, NSString, NSURL};
+use objc2_foundation::{NSArray, NSBundle, NSObject, NSPoint, NSRect, NSSize, NSString, NSURL};
 use objc2_quartz_core::CALayer;
 
 use crate::bibliotheque::{self, Image, Tri};
@@ -1974,6 +1974,15 @@ impl Cible {
         let principal = NSMenu::new(mtm);
         let app = self.element_menu("Mural", None, "", None);
         let sous_menu = NSMenu::new(mtm);
+        let version = NSBundle::mainBundle()
+            .objectForInfoDictionaryKey(&NSString::from_str("CFBundleShortVersionString"))
+            .and_then(|objet| objet.downcast_ref::<NSString>().map(|texte| texte.to_string()))
+            .filter(|texte| !texte.is_empty())
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+        let information = self.element_menu(&format!("Version {version}"), None, "", None);
+        information.setEnabled(false);
+        sous_menu.addItem(&information);
+        sous_menu.addItem(&NSMenuItem::separatorItem(mtm));
         // Reglages natifs : ⌘, comme toute application macOS.
         sous_menu.addItem(&self.element_menu(
             "Settings…",
