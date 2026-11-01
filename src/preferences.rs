@@ -34,6 +34,8 @@ pub struct Reglages {
     pub tri: String,
     /// Appliquer la meme image sur tous les ecrans.
     pub meme_image_partout: bool,
+    /// Experimental : propager aussi le fond sur tous les bureaux (Spaces).
+    pub tous_les_bureaux: bool,
     /// Image choisie par ecran (cle : UUID d'ecran, valeur : chemin).
     pub image_par_ecran: BTreeMap<String, String>,
     /// Images ajoutees aux favoris du diaporama (liste globale historique).
@@ -70,6 +72,7 @@ impl Default for Reglages {
             dossier: String::new(),
             tri: "nom".to_string(),
             meme_image_partout: false,
+            tous_les_bureaux: false,
             image_par_ecran: BTreeMap::new(),
             favoris: Vec::new(),
             selection_independante: false,
@@ -90,10 +93,11 @@ impl Default for Reglages {
 /// Toutes les cles du schema Rust actuel. Elles ne doivent jamais etre
 /// dupliquees dans `champs_inconnus`, sinon la sauvegarde ecrirait deux fois la
 /// meme cle.
-const CLES_RUST: [&str; 15] = [
+const CLES_RUST: [&str; 16] = [
     "dossier",
     "tri",
     "meme_image_partout",
+    "tous_les_bureaux",
     "image_par_ecran",
     "favoris",
     "selection_independante",
@@ -227,6 +231,8 @@ impl From<Value> for Reglages {
                 .or_else(|| booleen(&brut, "same_image_on_all"))
                 .unwrap_or(false);
 
+        reglages.tous_les_bureaux = booleen(&brut, "tous_les_bureaux").unwrap_or(false);
+
         reglages.image_par_ecran = if brut.contains_key("image_par_ecran") {
             dictionnaire_chaines(&brut, "image_par_ecran").unwrap_or_default()
         } else {
@@ -327,6 +333,7 @@ impl From<Reglages> for Value {
             "meme_image_partout".into(),
             json!(reglages.meme_image_partout),
         );
+        sortie.insert("tous_les_bureaux".into(), json!(reglages.tous_les_bureaux));
         sortie.insert("image_par_ecran".into(), json!(reglages.image_par_ecran));
         sortie.insert("favoris".into(), json!(reglages.favoris));
         sortie.insert(
