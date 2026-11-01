@@ -39,7 +39,7 @@ use crate::journal;
 use crate::interface;
 use crate::reglages_panneau::Panneau;
 use crate::suivi::{self, Issue};
-use crate::{ecrans, fond_ecran};
+use crate::{ecrans, fond_ecran, tous_bureaux};
 #[path = "avif_panneau.rs"]
 mod panneau_avif;
 
@@ -591,6 +591,10 @@ pub struct CibleIvars {
     suivi: RefCell<suivi::Suivi>,
     bilan: RefCell<suivi::Bilan>,
     relecture: RefCell<Option<Retained<objc2_foundation::NSTimer>>>,
+    /// Fonds a propager sur tous les bureaux : `attente` tant que macOS n'a pas
+    /// confirme, `pretes` une fois confirmes (traitees quand le suivi est vide).
+    propagation_attente: RefCell<Vec<(String, PathBuf)>>,
+    propagation_pretes: RefCell<Vec<(String, PathBuf)>>,
     panneau: RefCell<Option<std::rc::Rc<Panneau>>>,
 }
 
@@ -951,6 +955,16 @@ define_class!(
             self.rafraichir();
         }
 
+        #[unsafe(method(tousLesBureaux:))]
+        fn tous_les_bureaux(&self, _expediteur: &NSObject) {
+            {
+                let etat = unsafe { &mut *self.ivars().etat.get() };
+                etat.reglages.tous_les_bureaux = !etat.reglages.tous_les_bureaux;
+                etat.enregistrer();
+            }
+            self.rafraichir();
+        }
+
         /// Bascule la selection independante par ecran. Aucune liste n'est
         /// supprimee : le mode global et les listes dediees coexistent.
         #[unsafe(method(selectionIndependante:))]
@@ -1169,6 +1183,7 @@ define_class!(
             ));
             let mut appliques = 0usize;
             let mut erreurs = Vec::new();
+            let mut acceptes: Vec<(String, PathBuf)> = Vec::new();
             if cibles.is_empty() { journal::erreur("aucun ecran disponible"); return; }
             for e in cibles {
                 let sequence = self.enregistrer_intention(&e.cle, &chemin);
@@ -1176,6 +1191,7 @@ define_class!(
                     Some(ecran) => match fond_ecran::appliquer(&chemin, &ecran) {
                         Ok(()) => {
                             appliques += 1;
+                            acceptes.push((e.cle.clone(), chemin.clone()));
                             self.assurer_relecture();
                             journal::info(&format!("ecran {} : demande acceptee par macOS (confirmation differee)", e.index + 1));
                         }
@@ -1203,6 +1219,12 @@ define_class!(
                 }
             }
             unsafe { &mut *ivars.etat.get() }.enregistrer();
+            // Une nouvelle application remplace toute propagation en cours.
+            self.ivars().propagation_attente.borrow_mut().clear();
+            self.ivars().propagation_pretes.borrow_mut().clear();
+            if unsafe { &*ivars.etat.get() }.reglages.tous_les_bureaux {
+                *self.ivars().propagation_attente.borrow_mut() = acceptes;
+            }
             self.relever_fonds_actifs();
             self.rafraichir();
             if self.ivars().suivi.borrow().est_vide() {
@@ -1512,12 +1534,18 @@ impl Cible {
                         .reglages
                         .image_par_ecran
                         .insert(cle.clone(), chemin.to_string_lossy().into_owned());
-                    self.ivars().bilan.borrow_mut().confirmer(&cle, chemin);
+                    self.ivars().bilan.borrow_mut().confirmer(&cle, chemin.clone());
                     journal::info(&format!(
                         "{libelle} : chemin confirme par relecture (rendu non verifie)"
                     ));
+                    let mut attente = self.ivars().propagation_attente.borrow_mut();
+                    if let Some(i) = attente.iter().position(|(c, p)| *c == cle && *p == chemin) {
+                        let prete = attente.remove(i);
+                        self.ivars().propagation_pretes.borrow_mut().push(prete);
+                    }
                 }
                 Issue::DelaiDepasse => {
+                    self.ivars().propagation_attente.borrow_mut().retain(|(c, _)| *c != cle);
                     journal::erreur(&format!(
                         "{libelle} : changement non confirme apres {} ms",
                         suivi::DELAI_CONFIRMATION_MS
@@ -1531,6 +1559,7 @@ impl Cible {
                     );
                 }
                 Issue::EcranDisparu => {
+                    self.ivars().propagation_attente.borrow_mut().retain(|(c, _)| *c != cle);
                     journal::erreur(&format!("{libelle} : deconnecte avant confirmation"));
                     self.ivars()
                         .bilan
@@ -1538,6 +1567,7 @@ impl Cible {
                         .echouer(&cle, format!("{libelle} disconnected"));
                 }
                 Issue::EchecApi(message) => {
+                    self.ivars().propagation_attente.borrow_mut().retain(|(c, _)| *c != cle);
                     journal::erreur(&format!("{libelle} : {message}"));
                     self.ivars()
                         .bilan
@@ -1552,10 +1582,47 @@ impl Cible {
         }
         if self.ivars().suivi.borrow().est_vide() {
             self.arreter_relecture();
+            let propagation = self.propager_sur_tous_les_bureaux();
             self.relever_fonds_actifs();
             self.rafraichir();
-            if let Some(texte) = self.prendre_bilan() {
+            let texte = match (self.prendre_bilan(), propagation) {
+                (Some(bilan), Some(p)) => Some(format!("{bilan} — {p}")),
+                (bilan, p) => bilan.or(p),
+            };
+            if let Some(texte) = texte {
                 self.message(&texte);
+            }
+        }
+    }
+
+    /// Etend aux autres bureaux les fonds **deja confirmes** par macOS (jamais
+    /// avant : l'agent doit avoir ecrit le sien dans le magasin). Un seul passage,
+    /// une seule relance de `WallpaperAgent`.
+    fn propager_sur_tous_les_bureaux(&self) -> Option<String> {
+        let pretes: Vec<(String, PathBuf)> =
+            std::mem::take(&mut *self.ivars().propagation_pretes.borrow_mut());
+        self.ivars().propagation_attente.borrow_mut().clear();
+        if pretes.is_empty() {
+            return None;
+        }
+        let mut groupes: Vec<(PathBuf, Vec<String>)> = Vec::new();
+        for (cle, chemin) in pretes {
+            match groupes.iter_mut().find(|(p, _)| *p == chemin) {
+                Some((_, cles)) => cles.push(cle),
+                None => groupes.push((chemin, vec![cle])),
+            }
+        }
+        match tous_bureaux::appliquer_partout(&groupes) {
+            Ok(r) => {
+                journal::info(&format!(
+                    "tous les bureaux : {} ecran(s) et {} bureau(x) mis a jour",
+                    r.ecrans, r.bureaux
+                ));
+                Some(format!("applied to all desktops ({} updated)", r.total()))
+            }
+            Err(e) => {
+                journal::erreur(&format!("tous les bureaux : {e}"));
+                Some(format!("all desktops not updated: {e}"))
             }
         }
     }
@@ -1919,6 +1986,11 @@ impl Cible {
                 etat.reglages.meme_image_partout,
             ),
             (
+                "Also apply to all desktops (experimental)",
+                sel!(tousLesBureaux:),
+                etat.reglages.tous_les_bureaux,
+            ),
+            (
                 "Independent selection per display",
                 sel!(selectionIndependante:),
                 etat.reglages.selection_independante,
@@ -2071,6 +2143,8 @@ impl Cible {
             suivi: RefCell::new(suivi::Suivi::new()),
             bilan: RefCell::new(suivi::Bilan::new()),
             relecture: RefCell::new(None),
+            propagation_attente: RefCell::new(Vec::new()),
+            propagation_pretes: RefCell::new(Vec::new()),
             panneau: RefCell::new(None),
         });
         unsafe { msg_send![super(this), init] }

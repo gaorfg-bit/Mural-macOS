@@ -155,6 +155,7 @@ pub struct Panneau {
     // Display
     ecrans: Retained<NSPopUpButton>,
     meme_image: Retained<NSButton>,
+    tous_bureaux: Retained<NSButton>,
     tri_nom: Retained<NSButton>,
     tri_date: Retained<NSButton>,
     cle_affichee: Retained<NSTextField>,
@@ -254,6 +255,16 @@ impl Panneau {
             278.0,
             520.0,
         );
+        let tous_bureaux = case(
+            &display,
+            mtm,
+            cible,
+            "Also apply to all desktops (experimental)",
+            sel!(tousLesBureaux:),
+            10.0,
+            254.0,
+            520.0,
+        );
         titre(&display, mtm, "Sort images", 238.0);
         let tri_nom = bouton(
             &display,
@@ -282,7 +293,7 @@ impl Panneau {
         texte_long(
             &display,
             mtm,
-            "Each display keeps its own folder and wallpaper. Choosing a display here also updates the main window. Same image on all displays applies the selected image everywhere.",
+            "Each display keeps its own folder and wallpaper. Choosing a display here also updates the main window. Same image on all displays applies the selected image everywhere. Apply to all desktops also rewrites the wallpaper of every Space through a private macOS file; a backup is kept in Application Support/Mural.",
             10.0,
             90.0,
             520.0,
@@ -519,6 +530,7 @@ impl Panneau {
             cible: cible as *const NSObject,
             ecrans,
             meme_image,
+            tous_bureaux,
             tri_nom,
             tri_date,
             cle_affichee,
@@ -606,6 +618,8 @@ impl Panneau {
         ));
         self.meme_image
             .setState(if etat.reglages.meme_image_partout { 1 } else { 0 });
+        self.tous_bureaux
+            .setState(if etat.reglages.tous_les_bureaux { 1 } else { 0 });
         self.tri_nom.setState(if etat.tri == crate::bibliotheque::Tri::Nom {
             1
         } else {

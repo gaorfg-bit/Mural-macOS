@@ -20,6 +20,7 @@ pub mod journal;
 pub mod preferences;
 pub mod reglages_panneau;
 pub mod suivi;
+pub mod tous_bureaux;
 
 pub mod diaporama;
 
