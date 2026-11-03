@@ -23,7 +23,7 @@ if rg 'TEST NON EXECUTE' "$preuves/cargo-test.log" > "$preuves/omissions-avif.tx
     printf 'NON VERIFIE : certains scenarios AVIF ne sont pas executes sur ce systeme (voir omissions-avif.txt).\n'
 fi
 printf '\n2/10 — Compilation des recettes\n'
-cargo build --offline --locked --bin recette_bibliotheque --bin recette_interface --bin recette_memoire --bin recette_activation --bin recette_reentrance --bin recette_apercu --bin recette_suppression 2>&1 | tee "$preuves/cargo-build.log"
+cargo build --offline --locked --bin recette_bibliotheque --bin recette_interface --bin recette_memoire --bin recette_activation --bin recette_reentrance --bin recette_apercu --bin recette_suppression --bin recette_limite 2>&1 | tee "$preuves/cargo-build.log"
 printf '\n3/10 — Bibliotheque et restauration dans un second processus\n'
 "$projet/target/debug/recette_bibliotheque" 2>&1 | tee "$preuves/bibliotheque.log"
 "$projet/target/debug/recette_bibliotheque" --restauration 2>&1 | tee "$preuves/restauration.log"
@@ -48,6 +48,7 @@ for mode in grille panneau panneau-initial preferences; do
     MURAL_REGLAGES="$preuves/reentrance-$mode/reglages.json" "$projet/target/debug/recette_reentrance" "--$mode" 2>&1 | tee "$preuves/reentrance-$mode.log"
 done
 MURAL_REGLAGES="$preuves/suppression/reglages.json" "$projet/target/debug/recette_suppression" 2>&1 | tee "$preuves/suppression.log"
+MURAL_REGLAGES="$preuves/limite/reglages.json" "$projet/target/debug/recette_limite" 2>&1 | tee "$preuves/limite.log"
 printf '\n9/10 — Moteur Sparkle dans un bundle temporaire\n'
 "$projet/scripts/test-mises-a-jour.sh" 2>&1 | tee "$preuves/mises-a-jour.log"
 printf '\n10/10 — Archive source GPL, empreinte et tests extraits\n'
