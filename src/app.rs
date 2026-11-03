@@ -1032,20 +1032,19 @@ define_class!(
                 )
             };
             if !self.confirmer_suppression(&nom, avertissement) { return; }
-            // Caches d'abord : leurs cles dependent des metadonnees de la source,
-            // encore presente. Si la suppression echoue ensuite, les caches sont
-            // regeneres au besoin : aucune perte.
-            let copies_cache = crate::cache::dossier_defaut()
-                .map_or(0, |dossier| crate::cache::effacer_pour_source(&dossier, &chemin))
-                + crate::avif::effacer_cache(&chemin);
-            let texte = chemin.to_string_lossy().into_owned();
-            match std::fs::remove_file(&chemin) {
-                Ok(()) => {
-                    {
-                        let etat = unsafe { &mut *self.ivars().etat.get() };
-                        etat.reglages.oublier_image(&texte);
-                        etat.reglages.oublier_fond_supprime(&texte);
-                    }
+            let cache_vignettes = crate::cache::dossier_defaut();
+            let cache_avif = crate::avif::dossier_cache();
+            let resultat = {
+                let etat = unsafe { &mut *self.ivars().etat.get() };
+                crate::suppression::supprimer_image(
+                    &chemin,
+                    &mut etat.reglages,
+                    cache_vignettes.as_deref(),
+                    cache_avif.as_deref(),
+                )
+            };
+            match resultat {
+                Ok(copies_cache) => {
                     journal::info(&format!(
                         "image supprimee du disque : {} ({copies_cache} copie(s) de cache retiree(s))",
                         chemin.display()
