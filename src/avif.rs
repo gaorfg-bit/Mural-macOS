@@ -569,6 +569,21 @@ pub fn convertir(source: &Path, cache: &Path) -> Result<Conversion, String> {
     })
 }
 
+/// Retire la copie AVIF de `source` du cache. Retourne le nombre de fichiers.
+///
+/// A appeler AVANT la suppression de la source : la cle depend de sa date de
+/// modification et de sa taille. Ne retire que la version courante du format ;
+/// une copie d'une ancienne version reste orpheline (non detectee).
+pub fn effacer_cache(source: &Path) -> usize {
+    let (Some(dossier), Ok(identite)) = (dossier_cache(), identite(source)) else {
+        return 0;
+    };
+    [fichier_avif(&dossier, &identite), fichier_meta(&dossier, &identite)]
+        .iter()
+        .filter(|fichier| fs::remove_file(fichier).is_ok())
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

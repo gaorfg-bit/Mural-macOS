@@ -239,6 +239,65 @@ pub fn ecrire(dossier: &Path, identite: &Identite, image: &CGImage) {
     }
 }
 
+/// Retire les vignettes en cache de `source` (toutes largeurs confondues).
+///
+/// A appeler AVANT la suppression de la source : le chemin canonique sert a
+/// retrouver les `.ident`. Le `.ident` contient `texte()`, dont le deuxieme
+/// champ NUL est le chemin. Retourne le nombre de fichiers retires.
+pub fn effacer_pour_source(dossier: &Path, source: &Path) -> usize {
+    let cible = chemin_absolu(source).to_string_lossy().into_owned();
+    let Ok(entrees) = fs::read_dir(dossier) else {
+        return 0;
+    };
+    let mut retires = 0;
+    for entree in entrees.flatten() {
+        let ident = entree.path();
+        if ident.extension().and_then(|e| e.to_str()) != Some("ident") {
+            continue;
+        }
+        let Ok(texte) = fs::read_to_string(&ident) else {
+            continue;
+        };
+        if texte.split('\0').nth(1) != Some(cible.as_str()) {
+            continue;
+        }
+        if fs::remove_file(ident.with_extension("png")).is_ok() {
+            retires += 1;
+        }
+        if fs::remove_file(&ident).is_ok() {
+            retires += 1;
+        }
+    }
+    retires
+}
+
+#[cfg(test)]
+mod tests_effacement {
+    use super::*;
+
+    #[test]
+    fn effacer_pour_source_ne_touche_que_les_vignettes_de_cette_source() {
+        let base = std::env::temp_dir().join(format!(
+            "mural-effacement-{}-{}",
+            std::process::id(),
+            UNIX_EPOCH.elapsed().map(|d| d.as_nanos()).unwrap_or(0)
+        ));
+        fs::create_dir_all(&base).unwrap();
+        let a = base.join("a.png");
+        let b = base.join("b.png");
+        // Chemins inexistants : `chemin_absolu` retombe sur le chemin fourni.
+        for (nom, source) in [("1", &a), ("2", &b)] {
+            let texte = format!("mural-vignette\0{}\0{nom}", source.display());
+            fs::write(base.join(format!("{nom}.ident")), texte).unwrap();
+            fs::write(base.join(format!("{nom}.png")), b"png").unwrap();
+        }
+        assert_eq!(effacer_pour_source(&base, &a), 2);
+        assert!(!base.join("1.ident").exists() && !base.join("1.png").exists());
+        assert!(base.join("2.ident").exists() && base.join("2.png").exists());
+        fs::remove_dir_all(&base).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
