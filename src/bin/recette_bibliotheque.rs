@@ -204,6 +204,11 @@ fn represente(item: &NSMenuItem) -> Option<PathBuf> {
         .and_then(|objet| objet.downcast_ref::<NSString>().map(|s| PathBuf::from(s.to_string())))
 }
 
+/// Menu contextuel d'un bouton de vignette, construit comme au clic droit.
+fn menu_contextuel(bouton: &NSButton) -> Option<Retained<NSMenu>> {
+    unsafe { msg_send![bouton, menuForEvent: std::ptr::null::<objc2_app_kit::NSEvent>()] }
+}
+
 fn cible_ptr(cible: &AnyObject) -> usize {
     cible as *const AnyObject as usize
 }
@@ -400,7 +405,7 @@ fn mode_panneau(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
         }
     }
     let menu = ouvrir_menu(&cible, &bouton_menu, &observateur);
-    assert_eq!(menu.numberOfItems(), 13);
+    assert_eq!(menu.numberOfItems(), 14);
     let settings_item = commande(&menu, objc2::sel!(ouvrirReglages:));
     assert_eq!(titre(&settings_item), "Settings…");
     verifier_action(&settings_item, objc2::sel!(ouvrirReglages:), cible_ptr);
@@ -596,7 +601,7 @@ fn mode_panneau(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     );
     assert!(texte_json(&s, "avif_capacites").contains("AVIF reading:"));
     assert!(texte_json(&s, "avif_capacites").contains("AVIF encoding:"));
-    let avif_autorise = mural::formats::avif_encodable() && mural::avif::dossier_cache().is_some();
+    let avif_autorise = mural::avif::avif_encodable() && mural::avif::dossier_cache().is_some();
     assert_eq!(
         s["avif_bouton_actif"].as_bool().unwrap(),
         avif_autorise,
@@ -639,7 +644,7 @@ fn mode_panneau(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     assert_eq!(instantane(&cible)["meme_image"], 1);
     let menu_meme = ouvrir_menu(&cible, &bouton_menu, &observateur);
     assert_eq!(element(&menu_meme, 0).state(), 1, "menu non synchronise");
-    executer(&menu_meme, 3); // tri par date depuis le menu
+    executer(&menu_meme, 4); // tri par date depuis le menu
     let s = instantane(&cible);
     assert_eq!(s["tri_date"], 1, "panneau non synchronise au tri du menu");
     assert_eq!(s["tri_nom"], 0);
@@ -651,7 +656,7 @@ fn mode_panneau(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     assert!(preferences::charger().diaporama_aleatoire);
     assert_eq!(instantane(&cible)["aleatoire"], 1);
     let menu_aleatoire = ouvrir_menu(&cible, &bouton_menu, &observateur);
-    let diapo_menu = element(&menu_aleatoire, 5);
+    let diapo_menu = element(&menu_aleatoire, 6);
     let diapo_sous = sous_menu(&diapo_menu, &titre(&diapo_menu));
     executer(&diapo_sous, 2); // desactive l'ordre aleatoire depuis le menu
     assert!(!preferences::charger().diaporama_aleatoire);
@@ -1017,7 +1022,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
 
     // 1. Ouverture initiale : structure, états vides, aucune cible.
     let m1 = ouvrir_menu(&cible, &bouton, &observateur);
-    assert_eq!(m1.numberOfItems(), 13, "menu « … » incomplet");
+    assert_eq!(m1.numberOfItems(), 14, "menu « … » incomplet");
     assert_eq!(titre(&commande(&m1, objc2::sel!(cacheAvif:))), "AVIF cache…");
     verifier_action(&commande(&m1, objc2::sel!(cacheAvif:)), objc2::sel!(cacheAvif:), cible_ptr);
     assert_eq!(
@@ -1030,7 +1035,11 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     assert_eq!(titre(&zero), "Same image on all displays");
     verifier_action(&zero, objc2::sel!(memeImagePartout:), cible_ptr);
     assert_eq!(zero.state(), 0, "image commune cochee par defaut");
-    let independante = element(&m1, 1);
+    let tous_bureaux = element(&m1, 1);
+    assert_eq!(titre(&tous_bureaux), "Also apply to all desktops (experimental)");
+    verifier_action(&tous_bureaux, objc2::sel!(tousLesBureaux:), cible_ptr);
+    assert_eq!(tous_bureaux.state(), 0, "tous les bureaux coche par defaut");
+    let independante = element(&m1, 2);
     assert_eq!(titre(&independante), "Independent selection per display");
     verifier_action(
         &independante,
@@ -1042,14 +1051,14 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
         0,
         "selection independante cochee par defaut"
     );
-    let nom = element(&m1, 2);
+    let nom = element(&m1, 3);
     verifier_action(&nom, objc2::sel!(trierNom:), cible_ptr);
     assert_eq!(nom.state(), 1, "tri par nom non coche");
-    let date = element(&m1, 3);
+    let date = element(&m1, 4);
     verifier_action(&date, objc2::sel!(trierDate:), cible_ptr);
     assert_eq!(date.state(), 0, "tri par date coche a tort");
-    assert!(element(&m1, 4).isSeparatorItem());
-    let diapo = element(&m1, 5);
+    assert!(element(&m1, 5).isSeparatorItem());
+    let diapo = element(&m1, 6);
     assert_eq!(titre(&diapo), "Slideshow — 0 image(s)");
     let (demarrer, suivante, aleatoire, intervalles, ecrans) = etat_menu_diaporama(&diapo);
     assert!(!demarrer, "demarrage disponible sans image");
@@ -1086,16 +1095,16 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     ] {
         verifier_action(&element(&menu_diapo, index), attendu, cible_ptr);
     }
-    let favoris_item = element(&m1, 6);
+    let favoris_item = element(&m1, 7);
     let favoris = sous_menu(&favoris_item, "Favorite folders");
     assert_eq!(favoris.numberOfItems(), 1, "favoris vides attendus");
     assert!(!element(&favoris, 0).isEnabled(), "favori vide doit etre inactif");
     assert!(element(&favoris, 0).action().is_none());
     for (index, attendu) in [
-        (7, objc2::sel!(apercuPleinEcran:)),
-        (8, objc2::sel!(revelerImage:)),
-        (9, objc2::sel!(copierChemin:)),
-        (10, objc2::sel!(actualiser:)),
+        (8, objc2::sel!(apercuPleinEcran:)),
+        (9, objc2::sel!(revelerImage:)),
+        (10, objc2::sel!(copierChemin:)),
+        (11, objc2::sel!(actualiser:)),
     ] {
         verifier_action(&element(&m1, index), attendu, cible_ptr);
     }
@@ -1112,11 +1121,15 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
         .map(|(p, i)| (*p, *i))
         .unwrap();
     let vignette = unsafe { &*(adresse as *const NSButton) };
-    let menu_image = vignette.menu().expect("menu contextuel de vignette");
-    assert_eq!(menu_image.numberOfItems(), 5);
+    let menu_image = menu_contextuel(vignette).expect("menu contextuel de vignette");
+    // 4 commandes, « Include in slideshow », separateur, « Remove from gallery », « Delete from disk… ».
+    assert_eq!(menu_image.numberOfItems(), 8);
     verifier_action(&element(&menu_image, 0), objc2::sel!(appliquer:), cible_ptr);
     verifier_action(&element(&menu_image, 1), objc2::sel!(apercuPleinEcran:), cible_ptr);
     for item in menu_image.itemArray().iter() {
+        if item.isSeparatorItem() {
+            continue;
+        }
         assert_eq!(
             represente(&item),
             Some(unsafe { &*etat }.images[index].chemin.clone()),
@@ -1131,8 +1144,8 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
 
     // 3. Actions réelles sur les NSMenuItem, sans effet bureau.
     executer(&m1, 0); // même image partout
-    executer(&m1, 3); // tri par date
-    let diapo1 = element(&m1, 5);
+    executer(&m1, 4); // tri par date
+    let diapo1 = element(&m1, 6);
     let menu_diapo1 = sous_menu(&diapo1, &titre(&diapo1));
     executer(&menu_diapo1, 2); // ordre aléatoire
     let intervalle1 = element(&menu_diapo1, 3);
@@ -1140,8 +1153,12 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     executer(&sous_intervalles1, 2); // 15 min = 900 s
     let ecrans1 = element(&menu_diapo1, 4);
     let sous_ecrans1 = sous_menu(&ecrans1, "Participating displays");
-    assert!(sous_ecrans1.numberOfItems() > 1, "second ecran absent");
-    executer(&sous_ecrans1, 1); // retire l’ecran 2
+    let deux_ecrans = sous_ecrans1.numberOfItems() > 1;
+    if deux_ecrans {
+        executer(&sous_ecrans1, 1); // retire l’ecran 2
+    } else {
+        println!("NON VERIFIE : second ecran absent (retrait de l'ecran 2 du diaporama)");
+    }
     executer(&menu_diapo1, 6); // ajoute le dossier à la sélection
     let p = preferences::charger();
     assert!(p.meme_image_partout);
@@ -1149,14 +1166,16 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     assert!(p.diaporama_aleatoire);
     assert_eq!(p.diaporama_intervalle, 900);
     assert_eq!(p.favoris.len(), 3);
-    assert_eq!(p.diaporama_ecrans.as_ref().map(Vec::len), Some(1));
+    if deux_ecrans {
+        assert_eq!(p.diaporama_ecrans.as_ref().map(Vec::len), Some(1));
+    }
 
     // 4. Nouvelle ouverture : UI ↔ préférences, cibles disponibles.
     let m2 = ouvrir_menu(&cible, &bouton, &observateur);
     assert_eq!(element(&m2, 0).state(), 1, "image commune non cochee");
-    assert_eq!(element(&m2, 1).state(), 0);
-    assert_eq!(element(&m2, 3).state(), 1, "tri date non coche");
-    let diapo2 = element(&m2, 5);
+    assert_eq!(element(&m2, 2).state(), 0);
+    assert_eq!(element(&m2, 4).state(), 1, "tri date non coche");
+    let diapo2 = element(&m2, 6);
     assert_eq!(titre(&diapo2), "Slideshow — 3 image(s)");
     let (demarrer2, suivante2, aleatoire2, intervalles2, ecrans2) = etat_menu_diaporama(&diapo2);
     assert!(demarrer2, "demarrage indisponible avec images et ecran");
@@ -1205,7 +1224,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
         "participation vide non persistee"
     );
     let m3 = ouvrir_menu(&cible, &bouton, &observateur);
-    let diapo3 = element(&m3, 5);
+    let diapo3 = element(&m3, 6);
     assert_eq!(titre(&diapo3), "Slideshow — 3 image(s)");
     let (demarrer3, suivante3, _, _, ecrans3) = etat_menu_diaporama(&diapo3);
     assert!(!demarrer3, "demarrage possible sans ecran participant");
@@ -1222,7 +1241,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     let sous_ecrans3 = sous_menu(&ecrans3m, "Participating displays");
     executer(&sous_ecrans3, 0);
     let m4 = ouvrir_menu(&cible, &bouton, &observateur);
-    let diapo4 = element(&m4, 5);
+    let diapo4 = element(&m4, 6);
     let (demarrer4, suivante4, _, _, ecrans4) = etat_menu_diaporama(&diapo4);
     assert!(demarrer4 && suivante4, "lecture non retablie apres reactivation");
     assert!(bouton_diaporama.isEnabled() && bouton_suivante.isEnabled());
@@ -1238,20 +1257,20 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
         .to_owned();
     let m_ind = ouvrir_menu(&cible, &bouton, &observateur);
     assert_eq!(
-        titre(&element(&m_ind, 1)),
+        titre(&element(&m_ind, 2)),
         "Independent selection per display"
     );
-    executer(&m_ind, 1); // active le mode indépendant
+    executer(&m_ind, 2); // active le mode indépendant
     let p = preferences::charger();
     assert!(p.selection_independante);
     assert_eq!(p.favoris.len(), 3, "le mode ne supprime pas la liste globale");
     let m_ind2 = ouvrir_menu(&cible, &bouton, &observateur);
     assert_eq!(
-        element(&m_ind2, 1).state(),
+        element(&m_ind2, 2).state(),
         1,
         "indicateur de mode non coche"
     );
-    let diapo_ind = element(&m_ind2, 5);
+    let diapo_ind = element(&m_ind2, 6);
     assert_eq!(
         titre(&diapo_ind),
         "Slideshow — 0 image(s)",
@@ -1271,7 +1290,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
         "liste dediee non remplie"
     );
     let m_ind3 = ouvrir_menu(&cible, &bouton, &observateur);
-    let diapo_ind3 = element(&m_ind3, 5);
+    let diapo_ind3 = element(&m_ind3, 6);
     assert_eq!(titre(&diapo_ind3), "Slideshow — 3 image(s)");
     // Filtre : la galerie suit la liste pertinente.
     let menu_ind3 = sous_menu(&diapo_ind3, &titre(&diapo_ind3));
@@ -1293,7 +1312,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     );
     // Retour au mode global : aucune liste dédiée n'est effacée.
     let m_global = ouvrir_menu(&cible, &bouton, &observateur);
-    executer(&m_global, 1);
+    executer(&m_global, 2);
     let p = preferences::charger();
     assert!(!p.selection_independante);
     assert_eq!(
@@ -1345,7 +1364,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     });
     assert_eq!(preferences::charger().dossiers_favoris, vec![a.to_string_lossy().into_owned()]);
     let m5 = ouvrir_menu(&cible, &bouton, &observateur);
-    let favoris5 = sous_menu(&element(&m5, 6), "Favorite folders");
+    let favoris5 = sous_menu(&element(&m5, 7), "Favorite folders");
     assert_eq!(favoris5.numberOfItems(), 3, "favori + separateur + retrait attendus");
     let favori5 = element(&favoris5, 0);
     assert_eq!(titre(&favori5), a.to_string_lossy());
@@ -1367,7 +1386,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
         app.sendAction_to_from(action, bouton_favori.target().as_deref(), Some(&bouton_favori))
     });
     let m6 = ouvrir_menu(&cible, &bouton, &observateur);
-    let favoris6 = sous_menu(&element(&m6, 6), "Favorite folders");
+    let favoris6 = sous_menu(&element(&m6, 7), "Favorite folders");
     assert_eq!(favoris6.numberOfItems(), 4, "deux favoris + separateur + retrait");
     assert_eq!(titre(&element(&favoris6, 0)), a.to_string_lossy());
     assert_eq!(titre(&element(&favoris6, 1)), b.to_string_lossy());
@@ -1381,14 +1400,14 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     assert_eq!(unsafe { &*etat }.dossier, a);
     assert_eq!(preferences::charger().dossier, a.to_string_lossy());
     let menu_navigation = ouvrir_menu(&cible, &bouton, &observateur);
-    let favoris_navigation = sous_menu(&element(&menu_navigation, 6), "Favorite folders");
+    let favoris_navigation = sous_menu(&element(&menu_navigation, 7), "Favorite folders");
     assert_eq!(element(&favoris_navigation, 0).state(), 1);
     assert_eq!(element(&favoris_navigation, 1).state(), 0);
     executer(&favoris_navigation, 1);
     assert_eq!(unsafe { &*etat }.dossier, b);
     assert_eq!(preferences::charger().dossier, b.to_string_lossy());
     let menu_retrait = ouvrir_menu(&cible, &bouton, &observateur);
-    let favoris_retrait = sous_menu(&element(&menu_retrait, 6), "Favorite folders");
+    let favoris_retrait = sous_menu(&element(&menu_retrait, 7), "Favorite folders");
     let retirer6 = sous_menu(&element(&favoris_retrait, 3), "Remove favorite folder");
     assert_eq!(retirer6.numberOfItems(), 2);
     assert_eq!(represente(&element(&retirer6, 1)), Some(b.clone()));
@@ -1402,9 +1421,9 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     let mut ancien_element = Some(m6.itemAtIndex(0).expect("element initial"));
     for tour in 0..4 {
         let menu = ouvrir_menu(&cible, &bouton, &observateur);
-        assert_eq!(menu.numberOfItems(), 13, "menu instable au tour {tour}");
+        assert_eq!(menu.numberOfItems(), 14, "menu instable au tour {tour}");
         assert_eq!(titre(&element(&menu, 0)), "Same image on all displays");
-        assert_eq!(sous_menu(&element(&menu, 6), "Favorite folders").numberOfItems(), 3);
+        assert_eq!(sous_menu(&element(&menu, 7), "Favorite folders").numberOfItems(), 3);
         if let Some(ancien) = &ancien_element {
             assert!(
                 menu.itemArray().iter().all(|i| (&*i as *const NSMenuItem)
@@ -1425,7 +1444,7 @@ fn mode_menus(app: &NSApplication, mtm: MainThreadMarker, racine: &Path) {
     let convertir = bouton_action(&contenu_avif, objc2::sel!(convertirAvif:)).unwrap();
     let annuler = bouton_action(&contenu_avif, objc2::sel!(annulerAvif:)).unwrap();
     assert!(!annuler.isEnabled());
-    let capable = mural::formats::avif_encodable() && mural::avif::dossier_cache().is_some();
+    let capable = mural::avif::avif_encodable() && mural::avif::dossier_cache().is_some();
     assert_eq!(convertir.isEnabled(), capable);
     if let Some(cache) = std::env::var_os("MURAL_AVIF_CACHE").map(PathBuf::from)
         .filter(|p| p.starts_with(racine)) {
@@ -1633,7 +1652,7 @@ fn main() {
         .map(|(p, i)| (*p, *i))
         .unwrap();
     let bouton = unsafe { &*(adresse as *const NSButton) };
-    let menu = bouton.menu().expect("menu contextuel");
+    let menu = menu_contextuel(&bouton).expect("menu contextuel");
     assert_eq!(menu.numberOfItems(), 8);
     for item in menu.itemArray() {
         // Le separateur (avant « Remove from gallery ») ne porte aucun chemin.

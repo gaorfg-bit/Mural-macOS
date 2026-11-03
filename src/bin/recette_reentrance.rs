@@ -23,6 +23,18 @@ define_class!(
     struct Observateur;
     unsafe impl NSObjectProtocol for Observateur {}
     impl Observateur {
+        /// Le menu d'image est desormais construit au clic droit : la reconstruction de la
+        /// grille emet encore des notifications synchrones, ici le cadre d'une nouvelle cellule.
+        #[unsafe(method(cadreModifie:))]
+        fn cadre_modifie(&self, notification: &NSNotification) {
+            if self.ivars().declenche.get() { return; }
+            let Some(objet) = notification.object() else { return; };
+            if objet.class().name().to_str() == Ok("MuralVignette") {
+                self.ivars().declenche.set(true);
+                let _: () = unsafe { msg_send![&*self.ivars().cible, ouvrirFavori: &*self.ivars().dossier] };
+            }
+        }
+
         #[unsafe(method(menuAjoute:))]
         fn menu_ajoute(&self, notification: &NSNotification) {
             if self.ivars().declenche.get() { return; }
@@ -130,6 +142,16 @@ fn main() {
     });
     let observateur: Retained<Observateur> = unsafe { msg_send![super(observateur), init] };
     let centre = NSNotificationCenter::defaultCenter();
+    if !panneau {
+        unsafe {
+            centre.addObserver_selector_name_object(
+                &observateur,
+                sel!(cadreModifie:),
+                Some(objc2_app_kit::NSViewFrameDidChangeNotification),
+                None,
+            );
+        }
+    }
     unsafe {
         centre.addObserver_selector_name_object(
             &observateur,

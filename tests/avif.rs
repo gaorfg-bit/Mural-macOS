@@ -84,7 +84,7 @@ fn ecrire_avif(chemin: &Path, largeur: u32, hauteur: u32) -> bool {
 fn avif_synthetique_traverse_dimensions_galerie_vignette_apercu_et_cache() {
     let base = dossier_essai("integration");
     let source = base.join("photo.AVIF");
-    if !mural::formats::avif_encodable() {
+    if !mural::avif::avif_encodable() {
         eprintln!("TEST NON EXECUTE : aucun encodage AVIF fonctionnel detecte sur cette machine");
         return;
     }
@@ -165,7 +165,7 @@ fn capacite_annoncee_correspond_a_un_encodage_reel() {
     let encodage_reussi = ecrire_avif(&sortie, 1, 1);
 
     assert_eq!(
-        mural::formats::avif_encodable(),
+        mural::avif::avif_encodable(),
         encodage_reussi,
         "la capacite annoncee doit correspondre a la possibilite d'encoder"
     );

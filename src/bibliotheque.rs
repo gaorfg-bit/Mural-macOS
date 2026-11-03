@@ -11,27 +11,26 @@
 //! ni modifiees ni deplacees. La suppression (menu image, avec confirmation)
 //! passe par `app.rs`, jamais par ce module.
 
-use std::ffi::c_void;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2_core_foundation::{CFDictionary, CFString, CFURL};
+use objc2_core_foundation::CFDictionary;
 use objc2_core_graphics::CGImage;
-use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
+use objc2_foundation::{NSDictionary, NSNumber, NSString};
 use objc2_image_io::{
-    CGImageSource, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
+    kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
     kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
     kCGImageSourceThumbnailMaxPixelSize,
 };
 
+pub use crate::imageio::{ASPECT_VIGNETTE, Vignette};
+use crate::imageio::{cle_ns, en_any, ouvrir_source, propriete_entiere};
+
 /// Plafond de `Config.MAX_IMAGES` (`mural/config.py`).
 pub const LIMITE_DOSSIER: usize = 500;
-
-/// `Config.THUMBNAIL_ASPECT` : hauteur = largeur x 0,611.
-pub const ASPECT_VIGNETTE: f64 = 220.0 / 360.0;
 
 /// Une image trouvee dans le dossier courant.
 #[derive(Debug, Clone)]
@@ -47,15 +46,6 @@ pub struct Image {
 pub enum Tri {
     Nom,
     Date,
-}
-
-/// Image decodee par ImageIO, prete a etre presentee par l'interface.
-#[derive(Debug)]
-pub struct Vignette {
-    /// Image Core Graphics (a envelopper dans une NSImage cote interface).
-    pub image: objc2_core_foundation::CFRetained<CGImage>,
-    pub largeur: usize,
-    pub hauteur: usize,
 }
 
 /// Images retenues (au plus `LIMITE_DOSSIER`) et nombre total disponible.
@@ -110,7 +100,7 @@ pub fn lister_sauf(
     }
 
     match tri {
-        Tri::Nom => images.sort_by(|a, b| a.nom.to_lowercase().cmp(&b.nom.to_lowercase())),
+        Tri::Nom => images.sort_by_cached_key(|i| cle_tri_nom(&i.nom)),
         Tri::Date => images.sort_by(|a, b| b.date.cmp(&a.date)),
     }
     let total = images.len();
@@ -118,21 +108,45 @@ pub fn lister_sauf(
     Ok(Liste { images, total })
 }
 
+/// Cle de tri « naturel » insensible a la casse : les nombres comptent pour leur
+/// valeur (`img2` avant `img10`), comme dans le Finder.
+///
+/// Chaque suite de chiffres devient (0, valeur sans zeros de tete, longueur)
+/// et chaque autre caractere (1, caractere) ; la comparaison des vecteurs
+/// donne l'ordre voulu sans comparateur personnalise.
+fn cle_tri_nom(nom: &str) -> Vec<(u8, u128, char)> {
+    let mut cle = Vec::new();
+    let mut chiffres = String::new();
+    let mut vider = |chiffres: &mut String, cle: &mut Vec<(u8, u128, char)>| {
+        if !chiffres.is_empty() {
+            // Les nombres trop longs pour u128 sont satures : ordre approximatif, sans panic.
+            cle.push((0, chiffres.parse::<u128>().unwrap_or(u128::MAX), '\0'));
+            chiffres.clear();
+        }
+    };
+    for c in nom.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_digit() {
+            chiffres.push(c);
+        } else {
+            vider(&mut chiffres, &mut cle);
+            cle.push((1, 0, c));
+        }
+    }
+    vider(&mut chiffres, &mut cle);
+    cle
+}
+
 /// Dimensions en pixels, lues dans l'en-tete du fichier (aucun decodage).
 ///
-/// Les formats courants passent par la crate `image` (0 ms). Les formats
-/// qu'elle ignore — notamment AVIF — retombent sur les proprietes ImageIO
-/// `PixelWidth`/`PixelHeight`, sans decoder la pleine resolution.
+/// Lues par les proprietes ImageIO `PixelWidth`/`PixelHeight`, sans decoder la
+/// pleine resolution : meme chemin pour tous les formats, AVIF compris.
 pub fn dimensions(chemin: &Path) -> Option<(u32, u32)> {
-    if let Ok(dimensions) = image::image_dimensions(chemin) {
-        return Some(dimensions);
-    }
     dimensions_imageio(chemin)
 }
 
 /// Dimensions lues par ImageIO dans l'en-tete, sans decodage des pixels.
 fn dimensions_imageio(chemin: &Path) -> Option<(u32, u32)> {
-    let source = source(chemin)?;
+    let source = ouvrir_source(chemin)?;
     // Surete : aucune option particuliere n'est demandee a ImageIO.
     let proprietes = unsafe { source.properties_at_index(0, None) }?;
     // Surete : les cles sont des `extern static` ImageIO, lues une fois.
@@ -141,39 +155,6 @@ fn dimensions_imageio(chemin: &Path) -> Option<(u32, u32)> {
     let largeur = propriete_entiere(&proprietes, cle_largeur)?;
     let hauteur = propriete_entiere(&proprietes, cle_hauteur)?;
     Some((largeur, hauteur))
-}
-
-/// Lit une propriete entiere d'un dictionnaire ImageIO.
-///
-/// ImageIO stocke ces valeurs en CFNumber, « toll-free bridged » avec
-/// `NSNumber`.
-fn propriete_entiere(proprietes: &CFDictionary, cle: &CFString) -> Option<u32> {
-    // Surete : la cle est un CFString ImageIO, la valeur un CFNumber.
-    let brut = unsafe { proprietes.value(cle as *const CFString as *const c_void) };
-    if brut.is_null() {
-        return None;
-    }
-    let nombre: &NSNumber = unsafe { &*(brut as *const NSNumber) };
-    Some(nombre.unsignedIntValue())
-}
-
-/// Ouvre une source ImageIO a partir d'un chemin.
-fn source(chemin: &Path) -> Option<objc2_core_foundation::CFRetained<CGImageSource>> {
-    let chemin_ns = NSString::from_str(&chemin.to_string_lossy());
-    let url_ns = NSURL::fileURLWithPath(&chemin_ns);
-    // NSURL et CFURL sont « toll-free bridged » : meme objet, deux vues.
-    let url_cf: &CFURL = unsafe { &*(Retained::as_ptr(&url_ns) as *const CFURL) };
-    unsafe { CGImageSource::with_url(url_cf, None) }
-}
-
-/// Vrai objet Objective-C vu comme `AnyObject` (meme adresse, meme mise en page).
-fn en_any<T: objc2::Message>(objet: &T) -> &AnyObject {
-    unsafe { &*(objet as *const T as *const AnyObject) }
-}
-
-/// Enveloppe Objective-C des cles ImageIO (CFString et NSString sont bridged).
-fn cle_ns(cle: &'static CFString) -> &'static NSString {
-    unsafe { &*(cle as *const CFString as *const NSString) }
 }
 
 /// Options demandant a ImageIO une vignette a l'echelle, orientation corrigee.
@@ -192,7 +173,7 @@ fn options_vignette(cote_max: usize) -> Retained<NSDictionary<NSString, AnyObjec
 
 /// Produit une image a l'echelle demandee, sans jamais decoder la pleine resolution.
 fn image_reduite(chemin: &Path, cote_max: usize) -> Option<Vignette> {
-    let source = source(chemin)?;
+    let source = ouvrir_source(chemin)?;
     let options = options_vignette(cote_max);
     let options_cf: &CFDictionary =
         unsafe { &*(Retained::as_ptr(&options) as *const CFDictionary) };
@@ -403,6 +384,30 @@ mod tests {
         assert_eq!(liste.total, LIMITE_DOSSIER + 1);
         assert!(liste.images.iter().any(|i| i.nom == "img0501.png"));
         let _ = fs::remove_dir_all(&dossier);
+    }
+
+    #[test]
+    fn dimensions_imageio_png_jpeg_bmp() {
+        let base = dossier_essai("dimensions-formats");
+        for ext in ["png", "jpg", "bmp"] {
+            let chemin = base.join(format!("sonde.{ext}"));
+            image::RgbImage::new(41, 17).save(&chemin).unwrap();
+            assert_eq!(dimensions(&chemin), Some((41, 17)), "format {ext}");
+        }
+        assert_eq!(dimensions(&base.join("absent.png")), None);
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn tri_par_nom_est_naturel_et_insensible_a_la_casse() {
+        let mut noms = vec!["img10.png", "Img2.png", "img1.png", "b.png", "A.png", "img02.png"];
+        noms.sort_by_cached_key(|n| cle_tri_nom(n));
+        assert_eq!(
+            noms,
+            ["A.png", "b.png", "img1.png", "Img2.png", "img02.png", "img10.png"]
+        );
+        // Nombre gigantesque : pas de panic.
+        let _ = cle_tri_nom(&format!("x{}", "9".repeat(60)));
     }
 
     #[test]

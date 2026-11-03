@@ -12,16 +12,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use objc2::rc::Retained;
-use objc2_core_foundation::{CFDictionary, CFString, CFURL};
+use objc2_core_foundation::{CFDictionary, CFString};
 use objc2_core_graphics::CGImage;
-use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
+use objc2_foundation::{NSDictionary, NSNumber, NSString};
 use objc2_image_io::{CGImageDestination, CGImageSource, kCGImageSourceShouldCacheImmediately};
 
-use crate::bibliotheque::{ASPECT_VIGNETTE, Vignette};
+use crate::imageio::{ASPECT_VIGNETTE, Vignette, avec_url, chemin_absolu, empreinte, mtime_ns, temporaire as temporaire_dans};
 
 /// Version du format de cache : a incrementer des que le decodage, le
 /// recadrage ou le rapport change.
@@ -29,8 +27,6 @@ pub const VERSION_FORMAT: u32 = 1;
 
 /// Surcharge du dossier de cache (essais), sinon `~/Library/Caches/Mural/vignettes`.
 pub const VARIABLE_DOSSIER: &str = "MURAL_CACHE";
-
-static COMPTEUR: AtomicU64 = AtomicU64::new(0);
 
 /// Dossier de cache par defaut. `None` desactive le cache (pas de HOME).
 pub fn dossier_defaut() -> Option<PathBuf> {
@@ -80,26 +76,6 @@ impl Identite {
     }
 }
 
-fn chemin_absolu(chemin: &Path) -> PathBuf {
-    fs::canonicalize(chemin).unwrap_or_else(|_| {
-        if chemin.is_absolute() {
-            chemin.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map(|dossier| dossier.join(chemin))
-                .unwrap_or_else(|_| chemin.to_path_buf())
-        }
-    })
-}
-
-fn mtime_ns(meta: &fs::Metadata) -> Option<i128> {
-    let date = meta.modified().ok()?;
-    match date.duration_since(UNIX_EPOCH) {
-        Ok(duree) => Some(duree.as_nanos() as i128),
-        Err(erreur) => Some(-(erreur.duration().as_nanos() as i128)),
-    }
-}
-
 /// Identite d'une source, ou `None` si la source est absente/illisible.
 pub fn identite(chemin: &Path, largeur_cible: usize) -> Option<Identite> {
     let meta = fs::metadata(chemin).ok()?;
@@ -116,19 +92,6 @@ pub fn identite(chemin: &Path, largeur_cible: usize) -> Option<Identite> {
     })
 }
 
-/// Empreinte 128 bits (deux FNV-1a 64) de l'identite complete.
-fn empreinte(texte: &str) -> String {
-    let mut premier = 0xcbf2_9ce4_8422_2325u64;
-    let mut second = 0x8422_2325_cbf2_9ce4u64;
-    for octet in texte.bytes() {
-        premier ^= octet as u64;
-        premier = premier.wrapping_mul(0x100_0000_01b3);
-        second = second.rotate_left(7) ^ octet as u64;
-        second = second.wrapping_mul(0x100_0000_01b3);
-    }
-    format!("{premier:016x}{second:016x}")
-}
-
 fn cle(identite: &Identite) -> String {
     empreinte(&identite.texte())
 }
@@ -137,29 +100,12 @@ fn fichier_png(dossier: &Path, identite: &Identite) -> PathBuf {
     dossier.join(format!("{}.png", cle(identite)))
 }
 
+fn temporaire(dossier: &Path, identite: &Identite, extension: &str) -> PathBuf {
+    temporaire_dans(dossier, &cle(identite), extension)
+}
+
 fn fichier_identite(dossier: &Path, identite: &Identite) -> PathBuf {
     dossier.join(format!("{}.ident", cle(identite)))
-}
-
-fn temporaire(dossier: &Path, identite: &Identite, extension: &str) -> PathBuf {
-    let numero = COMPTEUR.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duree| duree.subsec_nanos())
-        .unwrap_or(0);
-    dossier.join(format!(
-        ".{}-{}-{numero}-{nanos}.{extension}.tmp",
-        cle(identite),
-        std::process::id()
-    ))
-}
-
-fn avec_url<T>(chemin: &Path, action: impl FnOnce(&CFURL) -> T) -> T {
-    let chemin_ns = NSString::from_str(&chemin.to_string_lossy());
-    let url_ns = NSURL::fileURLWithPath(&chemin_ns);
-    // NSURL et CFURL sont « toll-free bridged » : meme objet, deux vues.
-    let url_cf: &CFURL = unsafe { &*(Retained::as_ptr(&url_ns) as *const CFURL) };
-    action(url_cf)
 }
 
 fn encoder_png(image: &CGImage, chemin: &Path) -> bool {
@@ -271,9 +217,71 @@ pub fn effacer_pour_source(dossier: &Path, source: &Path) -> usize {
     retires
 }
 
+/// Age au-dela duquel une entree de cache est purgee au demarrage.
+pub const AGE_MAX_PURGE: std::time::Duration = std::time::Duration::from_secs(90 * 24 * 3600);
+
+/// Retire du cache les fichiers (`.png`, `.ident`, temporaires `.tmp`) non
+/// modifies depuis plus de `age_max`. Une entree purgee a tort se regenere au
+/// besoin (cout d'un decodage) : aucune perte. Retourne le nombre de fichiers.
+pub fn purger_anciens(dossier: &Path, age_max: std::time::Duration) -> usize {
+    let Ok(entrees) = fs::read_dir(dossier) else {
+        return 0;
+    };
+    let limite = std::time::SystemTime::now()
+        .checked_sub(age_max)
+        .unwrap_or(std::time::UNIX_EPOCH);
+    let mut retires = 0;
+    for entree in entrees.flatten() {
+        let chemin = entree.path();
+        let ext = chemin.extension().and_then(|e| e.to_str());
+        if !matches!(ext, Some("png" | "ident" | "tmp")) {
+            continue;
+        }
+        let Ok(date) = entree.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if date < limite && fs::remove_file(&chemin).is_ok() {
+            retires += 1;
+        }
+    }
+    retires
+}
+
+#[cfg(test)]
+mod tests_purge {
+    use super::*;
+    use std::time::{Duration, SystemTime};
+
+    fn vieillir(fichier: &Path, jours: u64) {
+        let f = fs::OpenOptions::new().write(true).open(fichier).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(jours * 24 * 3600))
+            .unwrap();
+    }
+
+    #[test]
+    fn purge_les_vieux_fichiers_du_cache_et_epargne_le_reste() {
+        let base = std::env::temp_dir().join(format!("mural-purge-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        for nom in ["vieux.png", "vieux.ident", ".temp.png.tmp", "recent.png", "autre.txt"] {
+            fs::write(base.join(nom), b"x").unwrap();
+        }
+        for nom in ["vieux.png", "vieux.ident", ".temp.png.tmp", "autre.txt"] {
+            vieillir(&base.join(nom), 200);
+        }
+        assert_eq!(purger_anciens(&base, AGE_MAX_PURGE), 3);
+        assert!(base.join("recent.png").exists(), "entree recente conservee");
+        assert!(base.join("autre.txt").exists(), "fichier etranger jamais touche");
+        assert!(!base.join("vieux.png").exists() && !base.join("vieux.ident").exists());
+        assert_eq!(purger_anciens(&base.join("absent"), AGE_MAX_PURGE), 0);
+        let _ = fs::remove_dir_all(&base);
+    }
+}
+
 #[cfg(test)]
 mod tests_effacement {
     use super::*;
+    use std::time::UNIX_EPOCH;
 
     #[test]
     fn effacer_pour_source_ne_touche_que_les_vignettes_de_cette_source() {
@@ -301,6 +309,7 @@ mod tests_effacement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use std::sync::Arc;
 
     fn dossier_essai(nom: &str) -> Gardien {

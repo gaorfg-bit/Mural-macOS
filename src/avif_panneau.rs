@@ -206,7 +206,7 @@ impl Panneau {
             .setStringValue(&NSString::from_str(&dossier.to_string_lossy()));
         self.dossier
             .setToolTip(Some(&NSString::from_str(&dossier.to_string_lossy())));
-        let capable = crate::formats::avif_encodable();
+        let capable = crate::avif::avif_encodable();
         let cache = crate::avif::dossier_cache().is_some();
         let message = if !capable {
             "AVIF encoding is not available on this Mac.".to_owned()

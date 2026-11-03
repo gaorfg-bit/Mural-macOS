@@ -1,4 +1,4 @@
-//! Capacites de decodage et capacite d'encodage reelle par ImageIO.
+//! Capacite de decodage AVIF annoncee par ImageIO (l'encodage vit dans `avif`).
 //!
 //! Aucune hypothese sur le numero de macOS : la seule source de verite est la
 //! liste d'identifiants UTI fournie par ImageIO, lue une fois par processus
@@ -7,7 +7,7 @@
 use std::sync::OnceLock;
 
 use objc2_core_foundation::{CFArray, CFString};
-use objc2_image_io::{CGImageDestination, CGImageSource};
+use objc2_image_io::CGImageSource;
 
 /// Identifiant UTI de l'AVIF.
 pub const IDENTIFIANT_AVIF: &str = "public.avif";
@@ -20,7 +20,7 @@ pub fn annonce(identifiants: &[String], identifiant: &str) -> bool {
 }
 
 /// Copie les identifiants UTI d'un tableau Core Foundation en chaines Rust.
-fn identifiants(array: &CFArray) -> Vec<String> {
+pub(crate) fn identifiants(array: &CFArray) -> Vec<String> {
     let mut liste = Vec::with_capacity(array.count().max(0) as usize);
     for index in 0..array.count() {
         // Surete : ImageIO renvoie un tableau de CFString.
@@ -40,18 +40,6 @@ pub fn avif_lisible() -> bool {
     *CELLULE.get_or_init(|| {
         let liste = unsafe { CGImageSource::type_identifiers() };
         annonce(&identifiants(&liste), IDENTIFIANT_AVIF)
-    })
-}
-
-/// Vrai si ImageIO annonce et reussit effectivement un encodage AVIF sur cette machine.
-///
-/// L'annonce seule peut etre optimiste : un encodage miniature en fichier temporaire
-/// verifie le chemin reel utilise par la conversion. Le resultat est memoise.
-pub fn avif_encodable() -> bool {
-    static CELLULE: OnceLock<bool> = OnceLock::new();
-    *CELLULE.get_or_init(|| {
-        let liste = unsafe { CGImageDestination::type_identifiers() };
-        annonce(&identifiants(&liste), IDENTIFIANT_AVIF) && crate::avif::encodage_fonctionnel()
     })
 }
 

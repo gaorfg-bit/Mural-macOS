@@ -16,6 +16,7 @@ pub mod cache;
 pub mod ecrans;
 pub mod fond_ecran;
 pub mod formats;
+pub mod imageio;
 pub mod journal;
 pub mod preferences;
 pub mod reglages_panneau;

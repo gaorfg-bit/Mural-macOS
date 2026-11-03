@@ -951,7 +951,7 @@ impl Panneau {
         } else {
             "not available"
         };
-        let encodage = if crate::formats::avif_encodable() {
+        let encodage = if crate::avif::avif_encodable() {
             "available"
         } else {
             "not available"
@@ -968,7 +968,7 @@ impl Panneau {
         self.avif_cache
             .setToolTip(Some(&NSString::from_str(&texte)));
         self.avif_ouvrir
-            .setEnabled(cache.is_some() && crate::formats::avif_encodable());
+            .setEnabled(cache.is_some() && crate::avif::avif_encodable());
     }
 
     /// Cle UUID d'un controle (participant ou association), par identite

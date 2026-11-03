@@ -53,7 +53,7 @@ fn main() {
     }
     let origine = Instant::now();
     let avif = std::env::args().any(|a| a == "--avif");
-    if avif && !mural::formats::avif_encodable() {
+    if avif && !mural::avif::avif_encodable() {
         println!("NON VERIFIE : encodeur AVIF absent, profil grande image non execute");
         return;
     }
