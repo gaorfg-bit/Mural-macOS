@@ -72,6 +72,8 @@ pub struct Etat {
     pub filtre_diaporama: bool,
     pub dossier: PathBuf,
     pub images: Vec<Image>,
+    /// Images du dossier hors masquees, avant la limite d'affichage.
+    pub total_images: usize,
     pub vignettes: Vec<Option<Retained<NSImage>>>,
     vignettes_en_attente: Vec<bool>,
     pub selection: Option<usize>,
@@ -145,6 +147,7 @@ impl Etat {
             reception: None,
             dossier,
             images: Vec::new(),
+            total_images: 0,
             vignettes: Vec::new(),
             vignettes_en_attente: Vec::new(),
             selection: None,
@@ -285,9 +288,10 @@ impl Etat {
         if let Some(erreur) = &self.erreur_sauvegarde { return erreur.clone(); }
         let selection = self.selection.map(|index| format!("Selected: {}", self.images[index].nom))
             .unwrap_or_else(|| "Select an image".into());
-        let base = format!("{} · {} slideshow image(s){}", selection,
+        let base = format!("{} · {} slideshow image(s){}{}", selection,
             self.reglages.favoris_selection(self.cle_ecran_courant()).len(),
-            if self.diaporama_actif { " · playing" } else { "" });
+            if self.diaporama_actif { " · playing" } else { "" },
+            texte_limite(self.images.len(), self.total_images));
         let en_attente: Vec<_> = self.zone_vignettes.iter()
             .map(|&i| self.vignettes_en_attente[i]).collect();
         statut_vignettes(&base, &en_attente)
@@ -309,21 +313,26 @@ impl Etat {
 
     /// Relit le dossier courant, regenere les vignettes, selectionne la premiere.
     pub fn recharger(&mut self) {
-        match bibliotheque::lister(&self.dossier, self.tri) {
-            Ok(mut images) => {
-                images.retain(|image| !self.reglages.image_masquee(&image.chemin.to_string_lossy()));
+        let reglages = &self.reglages;
+        match bibliotheque::lister_sauf(&self.dossier, self.tri, |chemin| {
+            reglages.image_masquee(&chemin.to_string_lossy())
+        }) {
+            Ok(liste) => {
                 journal::info(&format!(
-                    "dossier « {} » : {} image(s)",
+                    "dossier « {} » : {} image(s) affichee(s) sur {}",
                     self.dossier.display(),
-                    images.len()
+                    liste.images.len(),
+                    liste.total
                 ));
-                self.images = images;
+                self.total_images = liste.total;
+                self.images = liste.images;
             }
             Err(erreur) => {
                 journal::erreur(&format!(
                     "lecture du dossier « {} » impossible : {erreur}",
                     self.dossier.display()
                 ));
+                self.total_images = 0;
                 self.images = Vec::new();
             }
         }
@@ -3299,6 +3308,27 @@ mod tests_progression {
     fn termine_ou_vide_retablit_le_statut() {
         assert_eq!(statut_vignettes("Selected: photo · 2 slideshow image(s) · playing", &[false, false]), "Selected: photo · 2 slideshow image(s) · playing");
         assert_eq!(statut_vignettes("Select an image · 0 slideshow image(s)", &[]), "Select an image · 0 slideshow image(s)");
+    }
+}
+
+/// Suffixe de statut quand le dossier depasse la limite d'affichage.
+fn texte_limite(affichees: usize, total: usize) -> String {
+    if total > affichees {
+        format!(" · showing {affichees} of {total} images")
+    } else {
+        String::new()
+    }
+}
+
+#[cfg(test)]
+mod tests_limite {
+    use super::texte_limite;
+
+    #[test]
+    fn limite_signalee_seulement_si_des_images_sont_cachees() {
+        assert_eq!(texte_limite(500, 500), "");
+        assert_eq!(texte_limite(12, 12), "");
+        assert_eq!(texte_limite(500, 731), " · showing 500 of 731 images");
     }
 }
 
