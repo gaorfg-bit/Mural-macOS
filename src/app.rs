@@ -1015,13 +1015,24 @@ define_class!(
             let Some(chemin) = self.chemin_action(expediteur) else { return; };
             let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             if !self.confirmer_suppression(&nom) { return; }
+            // Caches d'abord : leurs cles dependent des metadonnees de la source,
+            // encore presente. Si la suppression echoue ensuite, les caches sont
+            // regeneres au besoin : aucune perte.
+            let copies_cache = crate::cache::dossier_defaut()
+                .map_or(0, |dossier| crate::cache::effacer_pour_source(&dossier, &chemin))
+                + crate::avif::effacer_cache(&chemin);
+            let texte = chemin.to_string_lossy().into_owned();
             match std::fs::remove_file(&chemin) {
                 Ok(()) => {
                     {
                         let etat = unsafe { &mut *self.ivars().etat.get() };
-                        etat.reglages.oublier_image(&chemin.to_string_lossy());
+                        etat.reglages.oublier_image(&texte);
+                        etat.reglages.oublier_fond_supprime(&texte);
                     }
-                    journal::info(&format!("image supprimee du disque : {}", chemin.display()));
+                    journal::info(&format!(
+                        "image supprimee du disque : {} ({copies_cache} copie(s) de cache retiree(s))",
+                        chemin.display()
+                    ));
                     self.recharger_galerie();
                     self.message(&format!("Deleted: {nom}"));
                 }

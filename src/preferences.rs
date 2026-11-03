@@ -641,6 +641,18 @@ mod tests {
     }
 
     #[test]
+    fn suppression_retire_le_fond_enregistre_mais_masquage_non() {
+        let mut reglages = Reglages::default();
+        reglages.image_par_ecran.insert("uuid-a".into(), "/Images/a.png".into());
+        reglages.image_par_ecran.insert("uuid-b".into(), "/Images/b.png".into());
+        reglages.masquer_image("/Images/a.png");
+        assert_eq!(reglages.image_par_ecran.len(), 2, "un masquage ne touche pas au fond");
+        reglages.oublier_fond_supprime("/Images/a.png");
+        assert!(!reglages.image_par_ecran.contains_key("uuid-a"));
+        assert_eq!(reglages.image_par_ecran["uuid-b"], "/Images/b.png");
+    }
+
+    #[test]
     fn dossiers_favoris_et_ecran_survivent_a_la_serialisation() {
         let texte = r#"{"dossiers_favoris":["/Images/Paysages"],"ecran_selectionne":"uuid-ecran"}"#;
         let reglages: Reglages = serde_json::from_str(texte).unwrap();
@@ -839,6 +851,12 @@ impl Reglages {
 
     pub fn restaurer_images_masquees(&mut self) {
         self.images_masquees.clear();
+    }
+
+    /// Reserve a la suppression du fichier : retire les fonds enregistres qui
+    /// pointent vers lui. Un simple masquage ne doit pas appeler cette methode.
+    pub fn oublier_fond_supprime(&mut self, chemin: &str) {
+        self.image_par_ecran.retain(|_, valeur| valeur != chemin);
     }
 
     pub fn retirer_dossier_favori(&mut self, dossier: &Path, cle: Option<&str>) {
