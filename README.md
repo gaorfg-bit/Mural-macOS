@@ -98,3 +98,24 @@ The existing 0.1.0 needs one manual upgrade to gain the built-in updater.
 For a source build, run `make sparkle` once to download and verify Sparkle 2.10.0,
 then `make bundle`. Cargo builds and subsequent bundle builds remain offline.
 See [update distribution](docs/MISES-A-JOUR.md) for release preparation.
+
+## Undo "Also apply to all desktops"
+
+This experimental option rewrites macOS's private wallpaper store
+(`~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`) and restarts
+`WallpaperAgent`. It is off by default and never edits your images. Before each change,
+Mural keeps copies in `~/Library/Application Support/Mural/sauvegardes-fonds/`:
+
+- `Index.plist.derniere` — the store just before the most recent change (replaced each time);
+- `Index.plist.original` — the store before Mural's first change (never overwritten).
+
+To undo the last change, quit Mural, then run:
+
+```bash
+cp ~/Library/Application\ Support/Mural/sauvegardes-fonds/Index.plist.derniere \
+   ~/Library/Application\ Support/com.apple.wallpaper/Store/Index.plist
+killall WallpaperAgent
+```
+
+Use `Index.plist.original` instead to go back further; it may predate wallpaper changes you
+made later in System Settings. You can also simply set the wallpaper again in System Settings.
