@@ -653,6 +653,19 @@ mod tests {
     }
 
     #[test]
+    fn dans_un_diaporama_regarde_la_liste_globale_et_celles_des_ecrans() {
+        let mut reglages = Reglages::default();
+        assert!(!reglages.dans_un_diaporama("/Images/a.png"));
+        reglages.favoris.push("/Images/a.png".into());
+        reglages
+            .favoris_par_ecran
+            .insert("uuid-a".into(), vec!["/Images/b.png".into()]);
+        assert!(reglages.dans_un_diaporama("/Images/a.png"));
+        assert!(reglages.dans_un_diaporama("/Images/b.png"));
+        assert!(!reglages.dans_un_diaporama("/Images/c.png"));
+    }
+
+    #[test]
     fn dossiers_favoris_et_ecran_survivent_a_la_serialisation() {
         let texte = r#"{"dossiers_favoris":["/Images/Paysages"],"ecran_selectionne":"uuid-ecran"}"#;
         let reglages: Reglages = serde_json::from_str(texte).unwrap();
@@ -785,6 +798,16 @@ impl Reglages {
         } else {
             &self.favoris
         }
+    }
+
+    /// Vrai si l'image figure dans une liste de diaporama, globale ou d'un
+    /// ecran quelconque (independamment du mode courant).
+    pub fn dans_un_diaporama(&self, chemin: &str) -> bool {
+        self.favoris.iter().any(|p| p == chemin)
+            || self
+                .favoris_par_ecran
+                .values()
+                .any(|liste| liste.iter().any(|p| p == chemin))
     }
 
     pub fn favori_inclus(&self, chemin: &str, cle: Option<&str>) -> bool {
