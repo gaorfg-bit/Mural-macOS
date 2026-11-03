@@ -575,10 +575,15 @@ pub fn convertir(source: &Path, cache: &Path) -> Result<Conversion, String> {
 /// modification et de sa taille. Ne retire que la version courante du format ;
 /// une copie d'une ancienne version reste orpheline (non detectee).
 pub fn effacer_cache(source: &Path) -> usize {
-    let (Some(dossier), Ok(identite)) = (dossier_cache(), identite(source)) else {
+    dossier_cache().map_or(0, |dossier| effacer_cache_dans(&dossier, source))
+}
+
+/// Variante a dossier explicite (tests, suppression).
+pub fn effacer_cache_dans(dossier: &Path, source: &Path) -> usize {
+    let Ok(identite) = identite(source) else {
         return 0;
     };
-    [fichier_avif(&dossier, &identite), fichier_meta(&dossier, &identite)]
+    [fichier_avif(dossier, &identite), fichier_meta(dossier, &identite)]
         .iter()
         .filter(|fichier| fs::remove_file(fichier).is_ok())
         .count()
