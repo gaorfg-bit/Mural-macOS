@@ -1634,11 +1634,11 @@ fn main() {
         .unwrap();
     let bouton = unsafe { &*(adresse as *const NSButton) };
     let menu = bouton.menu().expect("menu contextuel");
-    assert_eq!(menu.numberOfItems(), 5);
+    assert_eq!(menu.numberOfItems(), 8);
     for item in menu.itemArray() {
-        let chemin = item
-            .representedObject()
-            .unwrap()
+        // Le separateur (avant « Remove from gallery ») ne porte aucun chemin.
+        let Some(objet) = item.representedObject() else { continue };
+        let chemin = objet
             .downcast::<NSString>()
             .unwrap()
             .to_string();

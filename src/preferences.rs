@@ -48,6 +48,8 @@ pub struct Reglages {
     pub favoris_par_ecran: BTreeMap<String, Vec<String>>,
     /// Dossiers marques dans la bibliotheque (distincts des images du diaporama).
     pub dossiers_favoris: Vec<String>,
+    /// Images retirees de la galerie. Le fichier n'est pas touche.
+    pub images_masquees: Vec<String>,
     /// UUID de l’ecran selectionne au dernier lancement.
     pub ecran_selectionne: Option<String>,
     /// Aucun demarrage automatique : seuls ces parametres sont conserves.
@@ -78,6 +80,7 @@ impl Default for Reglages {
             selection_independante: false,
             favoris_par_ecran: BTreeMap::new(),
             dossiers_favoris: Vec::new(),
+            images_masquees: Vec::new(),
             ecran_selectionne: None,
             diaporama_intervalle: 300,
             diaporama_aleatoire: false,
@@ -93,7 +96,7 @@ impl Default for Reglages {
 /// Toutes les cles du schema Rust actuel. Elles ne doivent jamais etre
 /// dupliquees dans `champs_inconnus`, sinon la sauvegarde ecrirait deux fois la
 /// meme cle.
-const CLES_RUST: [&str; 16] = [
+const CLES_RUST: [&str; 17] = [
     "dossier",
     "tri",
     "meme_image_partout",
@@ -103,6 +106,7 @@ const CLES_RUST: [&str; 16] = [
     "selection_independante",
     "favoris_par_ecran",
     "dossiers_favoris",
+    "images_masquees",
     "ecran_selectionne",
     "diaporama_intervalle",
     "diaporama_aleatoire",
@@ -266,6 +270,7 @@ impl From<Value> for Reglages {
         } else {
             liste(&brut, "folder_bookmarks").unwrap_or_default()
         };
+        reglages.images_masquees = liste(&brut, "images_masquees").unwrap_or_default();
 
         reglages.ecran_selectionne = texte(&brut, "ecran_selectionne");
 
@@ -342,6 +347,7 @@ impl From<Reglages> for Value {
         );
         sortie.insert("favoris_par_ecran".into(), json!(reglages.favoris_par_ecran));
         sortie.insert("dossiers_favoris".into(), json!(reglages.dossiers_favoris));
+        sortie.insert("images_masquees".into(), json!(reglages.images_masquees));
         sortie.insert(
             "ecran_selectionne".into(),
             match reglages.ecran_selectionne {
@@ -617,6 +623,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn image_masquee_sort_du_diaporama_et_survit_a_la_serialisation() {
+        let mut reglages = Reglages::default();
+        reglages.favoris = vec!["/Images/a.png".into(), "/Images/b.png".into()];
+        reglages.favoris_par_ecran.insert("uuid".into(), vec!["/Images/a.png".into()]);
+        reglages.masquer_image("/Images/a.png");
+        reglages.masquer_image("/Images/a.png");
+        assert!(reglages.image_masquee("/Images/a.png"));
+        assert_eq!(reglages.images_masquees, ["/Images/a.png"]);
+        assert_eq!(reglages.favoris, ["/Images/b.png"]);
+        assert!(reglages.favoris_par_ecran["uuid"].is_empty());
+
+        let valeur = serde_json::to_value(&reglages).unwrap();
+        let relu: Reglages = serde_json::from_value(valeur).unwrap();
+        assert!(relu.image_masquee("/Images/a.png"));
+        assert!(!relu.image_masquee("/Images/b.png"));
+    }
+
+    #[test]
     fn dossiers_favoris_et_ecran_survivent_a_la_serialisation() {
         let texte = r#"{"dossiers_favoris":["/Images/Paysages"],"ecran_selectionne":"uuid-ecran"}"#;
         let reglages: Reglages = serde_json::from_str(texte).unwrap();
@@ -790,6 +814,31 @@ impl Reglages {
             return;
         };
         liste.retain(|p| p != chemin);
+    }
+
+    /// Retire l'image de toutes les listes du diaporama (globale et par ecran).
+    pub fn oublier_image(&mut self, chemin: &str) {
+        self.favoris.retain(|p| p != chemin);
+        for liste in self.favoris_par_ecran.values_mut() {
+            liste.retain(|p| p != chemin);
+        }
+    }
+
+    /// Masque l'image dans la galerie et la sort du diaporama. Le fichier n'est
+    /// jamais touche ici.
+    pub fn masquer_image(&mut self, chemin: &str) {
+        if !self.image_masquee(chemin) {
+            self.images_masquees.push(chemin.to_owned());
+        }
+        self.oublier_image(chemin);
+    }
+
+    pub fn image_masquee(&self, chemin: &str) -> bool {
+        self.images_masquees.iter().any(|p| p == chemin)
+    }
+
+    pub fn restaurer_images_masquees(&mut self) {
+        self.images_masquees.clear();
     }
 
     pub fn retirer_dossier_favori(&mut self, dossier: &Path, cle: Option<&str>) {

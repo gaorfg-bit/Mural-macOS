@@ -26,7 +26,8 @@ use objc2_app_kit::NSApplicationDelegate;
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSAutoresizingMaskOptions, NSBackingStoreType,
     NSBezelStyle, NSButton, NSColor, NSEvent, NSFont, NSImage, NSImageScaling, NSImageView, NSMenu,
-    NSMenuItem, NSModalResponseOK, NSOpenPanel, NSPasteboard, NSPopUpButton, NSScrollView,
+    NSAlert, NSAlertSecondButtonReturn, NSMenuItem, NSModalResponseOK, NSOpenPanel, NSPasteboard,
+    NSPopUpButton, NSScrollView,
     NSSearchField, NSSegmentSwitchTracking, NSSegmentedControl, NSTextField, NSView, NSWindow,
     NSWindowStyleMask, NSWorkspace,
 };
@@ -309,7 +310,8 @@ impl Etat {
     /// Relit le dossier courant, regenere les vignettes, selectionne la premiere.
     pub fn recharger(&mut self) {
         match bibliotheque::lister(&self.dossier, self.tri) {
-            Ok(images) => {
+            Ok(mut images) => {
+                images.retain(|image| !self.reglages.image_masquee(&image.chemin.to_string_lossy()));
                 journal::info(&format!(
                     "dossier « {} » : {} image(s)",
                     self.dossier.display(),
@@ -993,6 +995,51 @@ define_class!(
                 let ok = presse_papiers.setString_forType(&NSString::from_str(&chemin.to_string_lossy()), unsafe { objc2_app_kit::NSPasteboardTypeString });
                 self.message(if ok { "Path copied" } else { "Could not copy the path" });
             }
+        }
+
+        #[unsafe(method(masquerImage:))]
+        fn masquer_image(&self, expediteur: &NSObject) {
+            let Some(chemin) = self.chemin_action(expediteur) else { return; };
+            let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            {
+                let etat = unsafe { &mut *self.ivars().etat.get() };
+                etat.reglages.masquer_image(&chemin.to_string_lossy());
+            }
+            journal::info(&format!("image retiree de la galerie : {nom}"));
+            self.recharger_galerie();
+            self.message(&format!("Removed from gallery: {nom}"));
+        }
+
+        #[unsafe(method(supprimerImage:))]
+        fn supprimer_image(&self, expediteur: &NSObject) {
+            let Some(chemin) = self.chemin_action(expediteur) else { return; };
+            let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            if !self.confirmer_suppression(&nom) { return; }
+            match std::fs::remove_file(&chemin) {
+                Ok(()) => {
+                    {
+                        let etat = unsafe { &mut *self.ivars().etat.get() };
+                        etat.reglages.oublier_image(&chemin.to_string_lossy());
+                    }
+                    journal::info(&format!("image supprimee du disque : {}", chemin.display()));
+                    self.recharger_galerie();
+                    self.message(&format!("Deleted: {nom}"));
+                }
+                Err(erreur) => {
+                    journal::erreur(&format!("suppression impossible : {} : {erreur}", chemin.display()));
+                    self.message(&format!("Could not delete {nom}: {erreur}"));
+                }
+            }
+        }
+
+        #[unsafe(method(restaurerImages:))]
+        fn restaurer_images(&self, _expediteur: &NSObject) {
+            {
+                let etat = unsafe { &mut *self.ivars().etat.get() };
+                etat.reglages.restaurer_images_masquees();
+            }
+            journal::info("commande : afficher les images masquees");
+            self.recharger_galerie();
         }
 
         #[unsafe(method(apercuPleinEcran:))]
@@ -1928,7 +1975,46 @@ impl Cible {
         );
         selection.setState(if inclus { 1 } else { 0 });
         menu.addItem(&selection);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        menu.addItem(&self.element_menu(
+            "Remove from gallery",
+            Some(sel!(masquerImage:)),
+            "",
+            Some(chemin),
+        ));
+        menu.addItem(&self.element_menu(
+            "Delete from disk…",
+            Some(sel!(supprimerImage:)),
+            "",
+            Some(chemin),
+        ));
         menu
+    }
+
+    /// Recharge la galerie sans toucher au filtre de recherche.
+    fn recharger_galerie(&self) {
+        {
+            let etat = unsafe { &mut *self.ivars().etat.get() };
+            etat.enregistrer();
+            etat.recharger();
+        }
+        self.rafraichir_grille();
+        self.rafraichir();
+    }
+
+    /// Demande confirmation avant suppression. Appele sans emprunt `RefCell`
+    /// ni reference a l'etat : `runModal` peut rappeler l'application.
+    fn confirmer_suppression(&self, nom: &str) -> bool {
+        let mtm = MainThreadMarker::new().expect("alerte sur le fil principal");
+        let alerte = NSAlert::new(mtm);
+        alerte.setMessageText(&NSString::from_str(&format!("Delete « {nom} » from disk?")));
+        alerte.setInformativeText(&NSString::from_str(
+            "The file will be permanently deleted. This cannot be undone.",
+        ));
+        alerte.addButtonWithTitle(&NSString::from_str("Cancel"));
+        alerte.addButtonWithTitle(&NSString::from_str("Delete"));
+        let reponse = unsafe { alerte.runModal() };
+        reponse == NSAlertSecondButtonReturn
     }
 
     fn menu_dossiers(&self) -> Retained<NSMenu> {
@@ -2030,6 +2116,10 @@ impl Cible {
                 element.setEnabled(selection);
             }
             menu.addItem(&element);
+        }
+        // Conditionnelle : sans image masquee, les positions existantes ne bougent pas.
+        if !etat.reglages.images_masquees.is_empty() {
+            menu.addItem(&self.element_menu("Show hidden images", Some(sel!(restaurerImages:)), "", None));
         }
         // Derniere entree : les indices existants (AVIF = 11) ne bougent pas.
         menu.addItem(&self.element_menu(

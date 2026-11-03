@@ -2,7 +2,7 @@
 //!
 //! Sur macOS, chaque ecran recoit SA propre image : il n'y a pas de composite a
 //! fabriquer comme sous GNOME. On utilise uniquement `NSWorkspace`.
-//! Regle absolue : l'image d'origine n'est jamais modifiee, deplacee ni supprimee.
+//! Regle : l'image d'origine n'est jamais modifiee ni deplacee par ce module.
 
 use std::fmt;
 use std::path::{Path, PathBuf};

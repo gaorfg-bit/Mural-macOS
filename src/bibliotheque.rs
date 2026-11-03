@@ -8,7 +8,8 @@
 //! (crate `image`), contre quelques dizaines de ms avec ImageIO.
 //!
 //! Les fichiers JSON/texte ne sont jamais touches ; les images d'origine ne sont
-//! ni modifiees, ni deplacees, ni supprimees.
+//! ni modifiees ni deplacees. La suppression (menu image, avec confirmation)
+//! passe par `app.rs`, jamais par ce module.
 
 use std::ffi::c_void;
 use std::fs;
