@@ -1014,7 +1014,15 @@ define_class!(
         fn supprimer_image(&self, expediteur: &NSObject) {
             let Some(chemin) = self.chemin_action(expediteur) else { return; };
             let nom = chemin.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            if !self.confirmer_suppression(&nom) { return; }
+            let avertissement = {
+                let etat = unsafe { &*self.ivars().etat.get() };
+                let texte = chemin.to_string_lossy();
+                avertissement_suppression(
+                    etat.fonds_actifs.iter().any(|p| p.as_str() == texte),
+                    etat.reglages.dans_un_diaporama(&texte),
+                )
+            };
+            if !self.confirmer_suppression(&nom, avertissement) { return; }
             // Caches d'abord : leurs cles dependent des metadonnees de la source,
             // encore presente. Si la suppression echoue ensuite, les caches sont
             // regeneres au besoin : aucune perte.
@@ -2015,13 +2023,15 @@ impl Cible {
 
     /// Demande confirmation avant suppression. Appele sans emprunt `RefCell`
     /// ni reference a l'etat : `runModal` peut rappeler l'application.
-    fn confirmer_suppression(&self, nom: &str) -> bool {
+    fn confirmer_suppression(&self, nom: &str, avertissement: Option<String>) -> bool {
         let mtm = MainThreadMarker::new().expect("alerte sur le fil principal");
         let alerte = NSAlert::new(mtm);
         alerte.setMessageText(&NSString::from_str(&format!("Delete « {nom} » from disk?")));
-        alerte.setInformativeText(&NSString::from_str(
-            "The file will be permanently deleted. This cannot be undone.",
-        ));
+        let mut detail = String::from("The file will be permanently deleted. This cannot be undone.");
+        if let Some(avertissement) = avertissement {
+            detail = format!("{avertissement}\n\n{detail}");
+        }
+        alerte.setInformativeText(&NSString::from_str(&detail));
         alerte.addButtonWithTitle(&NSString::from_str("Cancel"));
         alerte.addButtonWithTitle(&NSString::from_str("Delete"));
         let reponse = unsafe { alerte.runModal() };
@@ -3289,6 +3299,37 @@ mod tests_progression {
     fn termine_ou_vide_retablit_le_statut() {
         assert_eq!(statut_vignettes("Selected: photo · 2 slideshow image(s) · playing", &[false, false]), "Selected: photo · 2 slideshow image(s) · playing");
         assert_eq!(statut_vignettes("Select an image · 0 slideshow image(s)", &[]), "Select an image · 0 slideshow image(s)");
+    }
+}
+
+/// Texte ajoute au dialogue de suppression quand l'image est encore utilisee.
+fn avertissement_suppression(fond_actif: bool, dans_diaporama: bool) -> Option<String> {
+    match (fond_actif, dans_diaporama) {
+        (false, false) => None,
+        (true, false) => Some("This image is currently a wallpaper on a display.".into()),
+        (false, true) => Some("This image is part of a slideshow selection.".into()),
+        (true, true) => Some(
+            "This image is currently a wallpaper on a display and is part of a slideshow selection."
+                .into(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests_suppression {
+    use super::avertissement_suppression;
+
+    #[test]
+    fn aucun_avertissement_si_l_image_n_est_pas_utilisee() {
+        assert_eq!(avertissement_suppression(false, false), None);
+    }
+
+    #[test]
+    fn fond_actif_et_diaporama_sont_signales() {
+        assert!(avertissement_suppression(true, false).unwrap().contains("wallpaper"));
+        assert!(avertissement_suppression(false, true).unwrap().contains("slideshow"));
+        let les_deux = avertissement_suppression(true, true).unwrap();
+        assert!(les_deux.contains("wallpaper") && les_deux.contains("slideshow"));
     }
 }
 
