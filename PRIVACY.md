@@ -5,7 +5,7 @@ Scope: Mural macOS 0.1.1 in this source tree. This notice describes the applicat
 
 ## Data handled on your Mac
 
-Mural does not require an account. When you choose a wallpaper folder, it reads image files in that folder to show the library, previews, dimensions, and file sizes. It does not edit, move, or delete the original images.
+Mural does not require an account. When you choose a wallpaper folder, it reads image files in that folder to show the library, previews, dimensions, and file sizes. It does not edit or move the original images. It deletes an image only when you choose "Delete from disk…" in the image menu and confirm; that deletion is permanent and does not use the Trash. "Remove from gallery" only hides the image inside Mural and never touches the file.
 
 Mural stores your selected folder paths, favorites, display selections, slideshow settings, and window preferences in `~/Library/Application Support/Mural/reglages.json`. It stores generated thumbnails in `~/Library/Caches/Mural/vignettes` and optional AVIF conversion copies in `~/Library/Caches/Mural/avif`. These files stay on your Mac unless you choose to share them.
 
