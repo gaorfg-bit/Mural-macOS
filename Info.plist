@@ -39,10 +39,10 @@
     <key>SUVerifyUpdateBeforeExtraction</key>
     <true/>
     <key>CFBundleDevelopmentRegion</key>
-    <string>fr</string>
+    <string>en</string>
     <key>CFBundleLocalizations</key>
     <array>
-        <string>fr</string>
+        <string>en</string>
     </array>
 </dict>
 </plist>
