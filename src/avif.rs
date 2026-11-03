@@ -16,26 +16,26 @@
 //!
 //! Aucune purge ni eviction : le cache grandit, l'utilisateur decide.
 
-use std::ffi::c_void;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
-use objc2_core_foundation::{CFDictionary, CFString, CFURL};
+use objc2_core_foundation::{CFDictionary, CFString};
 use objc2_core_graphics::CGImage;
-use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
+use objc2_foundation::{NSDictionary, NSNumber};
 use objc2_image_io::{
     kCGImageDestinationLossyCompressionQuality, kCGImagePropertyOrientation,
     kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
     kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
     kCGImageSourceShouldCacheImmediately, kCGImageSourceThumbnailMaxPixelSize, CGImageDestination,
-    CGImageSource,
 };
 
 use crate::formats::IDENTIFIANT_AVIF;
+use crate::imageio::{
+    avec_url, chemin_absolu, cle_ns, empreinte, empreinte_octets, en_any, mtime_ns, ouvrir_source,
+    propriete_entiere, temporaire as temporaire_dans,
+};
 
 /// Version du pipeline de conversion : a incrementer si le decodage,
 /// l'orientation ou les options d'encodage changent.
@@ -51,8 +51,6 @@ pub const VARIABLE_CACHE: &str = "MURAL_AVIF_CACHE";
 
 const EXTENSION_AVIF: &str = "avif";
 const EXTENSION_META: &str = "meta";
-
-static COMPTEUR: AtomicU64 = AtomicU64::new(0);
 
 /// Resultat d'une conversion (ou d'une reutilisation) AVIF.
 #[derive(Debug, Clone)]
@@ -130,26 +128,6 @@ impl Identite {
     }
 }
 
-fn chemin_absolu(chemin: &Path) -> PathBuf {
-    fs::canonicalize(chemin).unwrap_or_else(|_| {
-        if chemin.is_absolute() {
-            chemin.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map(|dossier| dossier.join(chemin))
-                .unwrap_or_else(|_| chemin.to_path_buf())
-        }
-    })
-}
-
-fn mtime_ns(meta: &fs::Metadata) -> Option<i128> {
-    let date = meta.modified().ok()?;
-    match date.duration_since(UNIX_EPOCH) {
-        Ok(duree) => Some(duree.as_nanos() as i128),
-        Err(erreur) => Some(-(erreur.duration().as_nanos() as i128)),
-    }
-}
-
 /// Identite de la source, ou une erreur lisible si elle est absente.
 fn identite(source: &Path) -> Result<Identite, String> {
     let meta = fs::metadata(source)
@@ -170,26 +148,12 @@ fn identite(source: &Path) -> Result<Identite, String> {
     })
 }
 
-/// Empreinte 128 bits (deux FNV-1a 64) du texte d'identite.
-fn empreinte(texte: &str) -> String {
-    empreinte_octets(texte.as_bytes())
-}
-
-// Controle de coherence du contenu, pas une signature cryptographique.
-fn empreinte_octets(octets: &[u8]) -> String {
-    let mut premier = 0xcbf2_9ce4_8422_2325u64;
-    let mut second = 0x8422_2325_cbf2_9ce4u64;
-    for octet in octets.iter().copied() {
-        premier ^= octet as u64;
-        premier = premier.wrapping_mul(0x100_0000_01b3);
-        second = second.rotate_left(7) ^ octet as u64;
-        second = second.wrapping_mul(0x100_0000_01b3);
-    }
-    format!("{premier:016x}{second:016x}")
-}
-
 fn cle(identite: &Identite) -> String {
     empreinte(&identite.texte())
+}
+
+fn temporaire(dossier: &Path, identite: &Identite, extension: &str) -> PathBuf {
+    temporaire_dans(dossier, &cle(identite), extension)
 }
 
 fn fichier_avif(dossier: &Path, identite: &Identite) -> PathBuf {
@@ -198,52 +162,6 @@ fn fichier_avif(dossier: &Path, identite: &Identite) -> PathBuf {
 
 fn fichier_meta(dossier: &Path, identite: &Identite) -> PathBuf {
     dossier.join(format!("{}.{EXTENSION_META}", cle(identite)))
-}
-
-/// Temporaire unique du meme dossier (renommage atomique garanti).
-fn temporaire(dossier: &Path, identite: &Identite, extension: &str) -> PathBuf {
-    let numero = COMPTEUR.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duree| duree.subsec_nanos())
-        .unwrap_or(0);
-    dossier.join(format!(
-        ".{}-{}-{numero}-{nanos}.{extension}.tmp",
-        cle(identite),
-        std::process::id()
-    ))
-}
-
-fn avec_url<T>(chemin: &Path, action: impl FnOnce(&CFURL) -> T) -> T {
-    let chemin_ns = NSString::from_str(&chemin.to_string_lossy());
-    let url_ns = NSURL::fileURLWithPath(&chemin_ns);
-    // NSURL et CFURL sont « toll-free bridged » : meme objet, deux vues.
-    let url_cf: &CFURL = unsafe { &*(Retained::as_ptr(&url_ns) as *const CFURL) };
-    action(url_cf)
-}
-
-fn ouvrir_source(chemin: &Path) -> Option<objc2_core_foundation::CFRetained<CGImageSource>> {
-    avec_url(chemin, |url| unsafe { CGImageSource::with_url(url, None) })
-}
-
-/// Vrai objet Objective-C vu comme `AnyObject` (meme adresse, mise en page).
-fn en_any<T: objc2::Message>(objet: &T) -> &AnyObject {
-    unsafe { &*(objet as *const T as *const AnyObject) }
-}
-
-/// Enveloppe Objective-C des cles ImageIO (CFString et NSString bridged).
-fn cle_ns(cle: &'static CFString) -> &'static NSString {
-    unsafe { &*(cle as *const CFString as *const NSString) }
-}
-
-/// Lit une propriete entiere d'un dictionnaire ImageIO.
-fn propriete_entiere(proprietes: &CFDictionary, cle: &CFString) -> Option<u32> {
-    let brut = unsafe { proprietes.value(cle as *const CFString as *const c_void) };
-    if brut.is_null() {
-        return None;
-    }
-    let nombre: &NSNumber = unsafe { &*(brut as *const NSNumber) };
-    Some(nombre.unsignedIntValue())
 }
 
 /// Geometrie brute de la source et orientation EXIF (1 = normale).
@@ -401,9 +319,28 @@ fn encoder(image: &CGImage, chemin: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// PNG 1x1 vert (RGB 32, 192, 96) : source de la sonde d'encodage, sans crate d'image.
+const PNG_SONDE: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde,
+    0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x50, 0x38, 0x90, 0x00, 0x00, 0x02, 0x44, 0x01, 0x41, 0x8f, 0xcf, 0x1f, 0xb7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
+];
+
+/// Vrai si ImageIO annonce et reussit effectivement un encodage AVIF sur cette machine.
+///
+/// L'annonce seule peut etre optimiste : un encodage miniature en fichier temporaire
+/// verifie le chemin reel utilise par la conversion. Le resultat est memoise.
+pub fn avif_encodable() -> bool {
+    static CELLULE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CELLULE.get_or_init(|| {
+        let liste = unsafe { objc2_image_io::CGImageDestination::type_identifiers() };
+        crate::formats::annonce(&crate::formats::identifiants(&liste), IDENTIFIANT_AVIF)
+            && encodage_fonctionnel()
+    })
+}
+
 /// Verifie une fois que le chemin ImageIO annonce fonctionne vraiment.
 /// L'image et le fichier sont synthetiques et confines a un sous-dossier temporaire.
-pub(crate) fn encodage_fonctionnel() -> bool {
+fn encodage_fonctionnel() -> bool {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -416,8 +353,7 @@ pub(crate) fn encodage_fonctionnel() -> bool {
 
     let source = base.join("sonde.png");
     let cible = base.join("sonde.avif");
-    let synthetique = image::RgbImage::from_pixel(1, 1, image::Rgb([32, 192, 96]));
-    let fonctionnel = synthetique.save(&source).is_ok()
+    let fonctionnel = fs::write(&source, PNG_SONDE).is_ok()
         && geometrie(&source)
             .ok()
             .and_then(|g| decoder(&source, &g).ok())
@@ -474,7 +410,7 @@ pub fn convertir(source: &Path, cache: &Path) -> Result<Conversion, String> {
         return Ok(conversion);
     }
 
-    if !crate::formats::avif_encodable() {
+    if !avif_encodable() {
         return Err("AVIF encoding is not supported by ImageIO on this system".to_string());
     }
 

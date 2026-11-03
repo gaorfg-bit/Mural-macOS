@@ -30,7 +30,7 @@ fn main() {
     );
     println!(
         "AVIF ENCODAGE : {}",
-        if mural::formats::avif_encodable() {
+        if mural::avif::avif_encodable() {
             "OUI"
         } else {
             "NON"

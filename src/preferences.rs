@@ -464,8 +464,13 @@ pub fn sauvegarder_vers(chemin: &Path, reglages: &Reglages) -> std::io::Result<(
     let texte = serde_json::to_string_pretty(reglages)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     let temporaire = chemin.with_extension(format!("{}.tmp", std::process::id()));
-    fs::write(&temporaire, texte)?;
-    fs::rename(temporaire, chemin)
+    // Un echec d'ecriture (disque plein) ou de renommage ne doit pas laisser de
+    // fichier temporaire orphelin (son nom contient le pid : il s'accumulerait).
+    if let Err(erreur) = fs::write(&temporaire, texte).and_then(|()| fs::rename(&temporaire, chemin)) {
+        let _ = fs::remove_file(&temporaire);
+        return Err(erreur);
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

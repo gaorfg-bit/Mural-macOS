@@ -1,6 +1,8 @@
 //! Galerie volumineuse et defilement, sans aucune application de fond.
 use objc2::{MainThreadMarker, Message, msg_send};
-use objc2_app_kit::{NSApplication, NSButton, NSEventMask, NSScrollView, NSSearchField, NSView};
+use objc2_app_kit::{
+    NSApplication, NSButton, NSEventMask, NSImageView, NSScrollView, NSSearchField, NSView,
+};
 use objc2_foundation::{NSDate, NSPoint, NSSize, NSString};
 use std::time::{Duration, Instant};
 
@@ -9,6 +11,15 @@ fn trouver(vue: &NSView) -> Option<objc2::rc::Retained<NSScrollView>> {
         return Some(v.retain());
     }
     vue.subviews().iter().find_map(|v| trouver(&v))
+}
+/// Vue d'apercu principale (et non les badges, qui sont aussi des `NSImageView`).
+fn apercu(vue: &NSView) -> Option<objc2::rc::Retained<NSImageView>> {
+    if let Some(v) = vue.downcast_ref::<NSImageView>()
+        && v.class().name().to_str() == Ok("MuralApercuBordABord")
+    {
+        return Some(v.retain());
+    }
+    vue.subviews().iter().find_map(|v| apercu(&v))
 }
 fn recherche(vue: &NSView) -> Option<objc2::rc::Retained<NSSearchField>> {
     if let Some(v) = vue.downcast_ref::<NSSearchField>() {
@@ -112,6 +123,13 @@ fn main() {
     let (fenetre, etat) =
         objc2::rc::autoreleasepool(|_| mural::app::construire(mtm, dossier, true));
     attendre(&app, 6.0);
+    // L'apercu se decode hors du fil principal : il doit etre affiche une fois la boucle AppKit servie.
+    let vue_apercu = apercu(&fenetre.contentView().unwrap()).expect("vue d'apercu");
+    assert!(
+        vue_apercu.image().is_some(),
+        "apercu decode en arriere-plan non affiche apres 6 s"
+    );
+    println!("OK : apercu decode hors du fil principal puis affiche");
     let nombre = || unsafe { &*etat }.vignettes.iter().flatten().count();
     println!(
         "IMAGES {} MINIATURES_CHARGEES {}",

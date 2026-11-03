@@ -73,7 +73,7 @@ fn est_avif(chemin: &Path) -> bool {
 }
 
 fn encodeur_present(nom: &str) -> bool {
-    if mural::formats::avif_encodable() {
+    if mural::avif::avif_encodable() {
         return true;
     }
     eprintln!("TEST NON EXECUTE ({nom}) : aucun encodage AVIF fonctionnel detecte ici");
