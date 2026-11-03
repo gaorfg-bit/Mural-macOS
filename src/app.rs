@@ -1483,9 +1483,10 @@ impl Cible {
         if self.ivars().etat.get().is_null() {
             return;
         }
-        let etat = unsafe { &*self.ivars().etat.get() }.instantane_reglages();
+        // Panneau jamais ouvert : inutile de cloner les reglages ni de calculer le plan.
         let panneau = self.ivars().panneau.borrow().clone();
         if let Some(panneau) = panneau {
+            let etat = unsafe { &*self.ivars().etat.get() }.instantane_reglages();
             panneau.actualiser(&etat);
         }
     }
