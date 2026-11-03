@@ -58,13 +58,31 @@ pub struct Vignette {
     pub hauteur: usize,
 }
 
+/// Images retenues (au plus `LIMITE_DOSSIER`) et nombre total disponible.
+#[derive(Debug, Clone)]
+pub struct Liste {
+    pub images: Vec<Image>,
+    /// Nombre d'images apres exclusion, avant la limite de `LIMITE_DOSSIER`.
+    pub total: usize,
+}
+
 /// Liste les images du PREMIER NIVEAU du dossier.
 ///
 /// Comme `folder.iterdir()` en Python : aucune recursion dans les sous-dossiers.
 pub fn lister(dossier: &Path, tri: Tri) -> std::io::Result<Vec<Image>> {
+    lister_sauf(dossier, tri, |_| false).map(|liste| liste.images)
+}
+
+/// Comme `lister`, mais les images pour lesquelles `exclue` renvoie vrai sont
+/// retirees AVANT la limite : une image masquee ne prend pas de place.
+pub fn lister_sauf(
+    dossier: &Path,
+    tri: Tri,
+    exclue: impl Fn(&Path) -> bool,
+) -> std::io::Result<Liste> {
     let mut images: Vec<Image> = Vec::new();
     if !dossier.is_dir() {
-        return Ok(images);
+        return Ok(Liste { images, total: 0 });
     }
 
     for entree in fs::read_dir(dossier)? {
@@ -73,7 +91,10 @@ pub fn lister(dossier: &Path, tri: Tri) -> std::io::Result<Vec<Image>> {
         let Ok(meta) = entree.metadata() else {
             continue;
         };
-        if !meta.is_file() || super::fond_ecran::extension_acceptee(&chemin).is_none() {
+        if !meta.is_file()
+            || super::fond_ecran::extension_acceptee(&chemin).is_none()
+            || exclue(&chemin)
+        {
             continue;
         }
         let nom = chemin
@@ -92,8 +113,9 @@ pub fn lister(dossier: &Path, tri: Tri) -> std::io::Result<Vec<Image>> {
         Tri::Nom => images.sort_by(|a, b| a.nom.to_lowercase().cmp(&b.nom.to_lowercase())),
         Tri::Date => images.sort_by(|a, b| b.date.cmp(&a.date)),
     }
+    let total = images.len();
     images.truncate(LIMITE_DOSSIER);
-    Ok(images)
+    Ok(Liste { images, total })
 }
 
 /// Dimensions en pixels, lues dans l'en-tete du fichier (aucun decodage).
@@ -357,6 +379,29 @@ mod tests {
         let images = lister(&dossier, Tri::Date).unwrap();
         assert_eq!(images.len(), 2);
         assert!(images[0].date >= images[1].date);
+        let _ = fs::remove_dir_all(&dossier);
+    }
+
+    #[test]
+    fn lister_sauf_retire_avant_la_limite_et_compte_le_total() {
+        let dossier = dossier_essai("limite");
+        // Ne garder que les images generees ici (le fixture en contient deux).
+        fs::remove_file(dossier.join("a.JPG")).unwrap();
+        fs::remove_file(dossier.join("b.png")).unwrap();
+        for i in 0..LIMITE_DOSSIER + 3 {
+            fs::write(dossier.join(format!("img{i:04}.png")), b"x").unwrap();
+        }
+        let liste = lister_sauf(&dossier, Tri::Nom, |_| false).unwrap();
+        assert_eq!(liste.images.len(), LIMITE_DOSSIER);
+        assert_eq!(liste.total, LIMITE_DOSSIER + 3);
+        // Masquer deux images du debut libere deux places pour la fin.
+        let liste = lister_sauf(&dossier, Tri::Nom, |p| {
+            p.file_name().is_some_and(|n| n == "img0000.png" || n == "img0001.png")
+        })
+        .unwrap();
+        assert_eq!(liste.images.len(), LIMITE_DOSSIER);
+        assert_eq!(liste.total, LIMITE_DOSSIER + 1);
+        assert!(liste.images.iter().any(|i| i.nom == "img0501.png"));
         let _ = fs::remove_dir_all(&dossier);
     }
 
