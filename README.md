@@ -11,6 +11,10 @@
 <a href='https://ko-fi.com/M4M51RKN7V' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi6.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
 </p>
 
+<p align="center">
+  <a href="https://x.com/GaoRApps" target="_blank">@GaoRApps sur X</a>
+</p>
+
 <p>Mural is a local-first wallpaper library: point it at a folder, browse and preview your
 images, keep favorites, and organize a slideshow for each display. It never modifies or
 moves your files, and only deletes one when you explicitly choose "Delete from disk…" and confirm.</p>
