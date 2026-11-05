@@ -12,12 +12,14 @@ use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSScreen, NSWorkspace, NSWorkspaceDesktopImageOptionKey};
 use objc2_foundation::{NSDictionary, NSError, NSString, NSURL};
 
-/// Extensions historiques — reprises telles quelles de `Config._BASE_EXT`
-/// (`mural/config.py`).
+/// Extensions historiques de `Config._BASE_EXT` (`mural/config.py`), **sans `svg`** :
+/// le decodeur ImageIO utilise pour les vignettes et l'apercu ne lit pas le SVG
+/// (mesure par `sonde` le 05/11 : vignette, dimensions et apercu en echec), ce
+/// qui affichait des cases « (unreadable) ».
 ///
 /// `.avif` s'y ajoute **uniquement** si ImageIO annonce son decodage
 /// (`formats::avif_lisible`), sans hypothese sur la version de macOS.
-pub const EXTENSIONS_ACCEPTEES: [&str; 6] = ["png", "jpg", "jpeg", "bmp", "webp", "svg"];
+pub const EXTENSIONS_ACCEPTEES: [&str; 5] = ["png", "jpg", "jpeg", "bmp", "webp"];
 
 /// Erreurs possibles lors de l'application d'un fond d'ecran.
 #[derive(Debug)]
@@ -145,6 +147,12 @@ mod tests {
             extension_acceptee_avec(Path::new("photo.AvIf"), true),
             Some("avif".to_string())
         );
+    }
+
+    #[test]
+    fn svg_refuse_faute_de_decodeur() {
+        assert_eq!(extension_acceptee_avec(Path::new("logo.svg"), true), None);
+        assert_eq!(extension_acceptee_avec(Path::new("logo.SVG"), false), None);
     }
 
     #[test]
