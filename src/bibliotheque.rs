@@ -78,6 +78,11 @@ pub fn lister_sauf(
     for entree in fs::read_dir(dossier)? {
         let Ok(entree) = entree else { continue };
         let chemin = entree.path();
+        // Fichiers caches, dont les doublons AppleDouble `._photo.jpg` que macOS
+        // cree sur les disques externes : jamais des images affichables.
+        if entree.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         let Ok(meta) = entree.metadata() else {
             continue;
         };
@@ -351,6 +356,17 @@ mod tests {
         let noms: Vec<&str> = images.iter().map(|i| i.nom.as_str()).collect();
         assert_eq!(noms, vec!["a.JPG", "b.png"]);
         assert!(images.iter().all(|i| i.chemin.is_file()));
+        let _ = fs::remove_dir_all(&dossier);
+    }
+
+    #[test]
+    fn lister_ignore_les_fichiers_caches_et_appledouble() {
+        let dossier = dossier_essai("caches");
+        fs::write(dossier.join("._b.png"), b"x").unwrap();
+        fs::write(dossier.join(".cache.jpg"), b"x").unwrap();
+        let images = lister(&dossier, Tri::Nom).unwrap();
+        let noms: Vec<&str> = images.iter().map(|i| i.nom.as_str()).collect();
+        assert_eq!(noms, vec!["a.JPG", "b.png"]);
         let _ = fs::remove_dir_all(&dossier);
     }
 
