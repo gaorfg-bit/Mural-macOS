@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://x.com/GaoRApps" target="_blank">@GaoRApps sur X</a>
+  <a href="https://x.com/GaoRApps" target="_blank">@GaoRApps on X</a>
 </p>
 
 <p>Mural is a local-first wallpaper library: point it at a folder, browse and preview your
