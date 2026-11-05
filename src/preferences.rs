@@ -466,7 +466,17 @@ pub fn sauvegarder_vers(chemin: &Path, reglages: &Reglages) -> std::io::Result<(
     let temporaire = chemin.with_extension(format!("{}.tmp", std::process::id()));
     // Un echec d'ecriture (disque plein) ou de renommage ne doit pas laisser de
     // fichier temporaire orphelin (son nom contient le pid : il s'accumulerait).
-    if let Err(erreur) = fs::write(&temporaire, texte).and_then(|()| fs::rename(&temporaire, chemin)) {
+    // `sync_all` avant `rename` : apres une coupure de courant, le fichier
+    // renomme ne doit pas etre vide (il serait alors illisible et l'app
+    // refuserait toute sauvegarde ulterieure).
+    let ecrire = || -> std::io::Result<()> {
+        use std::io::Write;
+        let mut fichier = fs::File::create(&temporaire)?;
+        fichier.write_all(texte.as_bytes())?;
+        fichier.sync_all()?;
+        fs::rename(&temporaire, chemin)
+    };
+    if let Err(erreur) = ecrire() {
         let _ = fs::remove_file(&temporaire);
         return Err(erreur);
     }
