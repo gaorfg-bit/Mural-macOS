@@ -8,6 +8,10 @@ Date : 5 novembre 2026 · Branche : `stabilisation-0.1.3` · Point de restaurati
 > la cible Rust macOS n'était pas téléchargeable, et le Terminal du Mac n'accepte pas la saisie
 > par contrôle d'ordinateur. Chaque constat porte la mention **[vérifié dans le code]**,
 > **[documenté]** (affirmé par la doc du projet, non revérifié) ou **[hypothèse]**.
+>
+> **Mise à jour du 5/11 (session Mac, Claude Code)** : compilation, `scripts/valider.sh` et mesures
+> réellement exécutés sur macOS 27 (Darwin 27.2), cargo 1.98.1, un seul écran (38GN950).
+> Mention **[mesuré 5/11]**. Les constats U1/U2 et C5 ont été **revérifiés dans le code**.
 
 ---
 
@@ -62,7 +66,9 @@ Choix discutables mais **à ne pas réécrire avant samedi** :
 | C5 | P2 | Aperçu plein écran décodé **sur le fil principal** jusqu'à 5120 px | `app.rs` `apercu_plein_ecran` | Ouvert |
 | C6 | P2 | « Delete from disk… » = `remove_file` définitif, sans Corbeille (décision du 03/11) | `suppression.rs:23` | **Soumis à validation** |
 | C7 | P2 | `tous_bureaux` : lecture/écriture du plist privé sans protection contre une écriture simultanée de `WallpaperAgent` ; expérimental, désactivé par défaut | `tous_bureaux::propager` | Accepté (risque documenté) |
-| C8 | P3 | Sauvegarde des réglages sans `fsync` avant `rename` : coupure de courant → fichier possiblement vide → C3 | `preferences.rs:469` | Ouvert |
+| C8 | P2 | Sauvegarde des réglages sans `fsync` avant `rename` : coupure de courant → fichier possiblement vide → C3 (l'app refuse ensuite toute sauvegarde) | `preferences::sauvegarder_vers` | **Corrigé et testé** : `sync_all` (F_FULLFSYNC) ; coût mesuré 4–5 ms, max 9 ms, uniquement sur actions explicites |
+| C11 | **P1** | `archiver-source.sh` archive l'arbre de travail : un `.DS_Store` ignoré par git (`src/.DS_Store`, créé par le Finder) entre dans l'archive GPL publique ; `test-source-archive.sh` échoue → **publication bloquée** | 1re exécution de `valider.sh` le 5/11 : étape 10 en échec | **Corrigé et testé** : `tar --exclude '.DS_Store' --exclude '._*'` |
+| C12 | P3 | 48 avertissements du compilateur (`unsafe` devenus inutiles avec la toolchain 1.98, variables `ivars` inutilisées, `NSBezelStyle::Rounded` déprécié) | `cargo test` | Ouvert — cosmétique, nettoyage après samedi (churn sur ~45 sites) |
 | C9 | P3 | `journal` : ouverture/fermeture du fichier + `NSDateFormatter` neuf à chaque ligne ; journal verbeux (chaque sélection, recherche) | `journal.rs` | Ouvert |
 | C10 | P3 | `apercu_plein_ecran` déréférence `fenetre` sans test de nullité (toujours non nul après construction) | `app.rs:714` | Accepté |
 
@@ -81,8 +87,8 @@ Aucun `unwrap` dangereux hors tests ; les `expect` restants portent sur `MainThr
 
 | ID | Gravité | Constat |
 | --- | --- | --- |
-| U1 | **P1** | Barre d'outils, panneau dossiers **et boutons de fenêtre** masqués au repos, révélés à 14 px du bord haut / 8 px du bord gauche (`interface.rs`). Découvrabilité quasi nulle pour un nouvel utilisateur. |
-| U2 | **P1** | Aucun état vide : dossier sans image → aperçu et grille vides, statut dans un panneau masqué. |
+| U1 | **P1 → corrigé 5/11** | Barre d'outils, panneau dossiers **et boutons de fenêtre** masqués au repos, révélés à 14 px du bord haut / 8 px du bord gauche (`interface.rs`). Découvrabilité quasi nulle pour un nouvel utilisateur. |
+| U2 | **P1 → corrigé 5/11** | Aucun état vide : dossier sans image → aperçu et grille vides, statut dans un panneau masqué. |
 | U3 | P2 | Pas de navigation clavier dans la grille (flèches, Entrée pour appliquer). |
 | U4 | P2 | « AVIF cache… » visible dans deux menus : fonction obscure pour un nouvel utilisateur, les copies ne servent pas aux fonds. |
 | U5 | P2 | Le diaporama ne reprend pas après relance et aucun lancement à l'ouverture de session : beaucoup d'utilisateurs s'attendront à l'inverse. |
@@ -106,20 +112,29 @@ la galerie est vide ou à la première ouverture, et afficher au centre de la gr
 | Commit | Contenu | Vérification |
 | --- | --- | --- |
 | `8234657` | `PRIVACY.md` : flux réel (Worker Cloudflare → GitHub), compteurs agrégés, portée 0.1.3 | Relecture du texte contre `Info.plist` et `MISES-A-JOUR.md` |
-| `db5bf65` | `bibliotheque.rs` : ignore les fichiers commençant par `.` ; test `lister_ignore_les_fichiers_caches_et_appledouble` | **Non compilé** — à valider |
+| `db5bf65` | `bibliotheque.rs` : ignore les fichiers commençant par `.` ; test `lister_ignore_les_fichiers_caches_et_appledouble` | **Compilé et testé le 5/11** (`valider.sh` code 0) |
+| (5/11, non committé) | `scripts/archiver-source.sh` : exclusion des métadonnées Finder (C11) | `test-source-archive.sh` OK, 74 entrées |
+| (5/11, non committé) | `preferences.rs` : `sync_all` avant `rename` (C8) | 19 tests `preferences` + `valider.sh` code 0 |
+| (5/11, non committé, **accord utilisateur**) | U1/U2 : `interface::Racine::epingler` garde barre d'outils, panneau dossiers et boutons de fenêtre visibles tant que la galerie est vide (hors recherche) ; `grille::message_galerie_vide` + bouton « Open folder… » au centre de la grille : dossier introuvable (disque débranché, chemin affiché), dossier sans image, recherche sans résultat (sans épinglage). Galerie remplie : comportement inchangé | 3 tests unitaires ; rendu hors écran des cas « vide » et « introuvable » (composition) ; `valider.sh` code 0, 123 tests ; **épinglage au survol non observé à l'écran** |
 
 Aucune modification visuelle ni de comportement utilisateur n'a été faite sans accord.
 
 ## 8. Tests exécutés
 
-**Aucun pendant cette session.** Dernière exécution documentée : `scripts/valider.sh`, 24/10/2026, 102 tests + recettes, code 0 [documenté, non revérifié].
+**[mesuré 5/11]** `scripts/valider.sh` sur `stabilisation-0.1.3` :
+- 1re exécution (état `695f093`) : étapes 1–9 vertes, **étape 10 en échec** (C11).
+- 2e exécution (après C8 + C11) : **code 0**, 120 tests Cargo réussis / 0 échec, 45 recettes `OK`,
+  Sparkle (bundle temporaire, sans téléchargement) OK, archive source OK. Preuves : `/private/tmp/mural-validation.PxxGoc`.
+- 3e exécution (après U1/U2) : **code 0**, 123 tests / 0 échec, 45 recettes `OK`. Preuves : `/private/tmp/mural-validation.baINFE`.
+- `NON VERIFIE` restants : second écran absent (4 scénarios). Aucun fond appliqué pendant les recettes.
+- Non mesuré dans cette session : Instruments, temps de lancement, mémoire longue durée (dernières mesures `ps`/`top` du 03/11 : fenêtre en 205 ms, RSS 170–179 Mo, CPU au repos 0–0,3 % [documenté]).
 
 ## 9. Vérifications manuelles nécessaires
 
 **Bloquantes avant publication**
-1. `./scripts/valider.sh` sur la branche `stabilisation-0.1.3` → code 0 (valide aussi `db5bf65`).
+1. ~~`./scripts/valider.sh` sur la branche~~ **Fait le 5/11, code 0** (voir §8).
 2. Installation propre : nouveau compte macOS, `brew install --cask gaorfg-bit/mural/mural-macos`, premier lancement via Réglages → Confidentialité → « Ouvrir quand même ». Noter chaque friction.
-3. Premier lancement avec un `~/Pictures` sans image au premier niveau : constater U1/U2 et trancher.
+3. Premier lancement avec un `~/Pictures` sans image au premier niveau : vérifier **à l'écran** que les commandes restent visibles et que « Open folder… » central fonctionne, puis qu'elles se masquent à nouveau une fois un dossier rempli ouvert.
 4. Mise à jour Sparkle réelle de la version publiée précédente vers celle de samedi (téléchargement, remplacement, relance, réglages conservés).
 
 **Recommandées**
@@ -132,9 +147,9 @@ Aucune modification visuelle ni de comportement utilisateur n'a été faite sans
 ## 10. Risques résiduels
 
 - Gatekeeper / Homebrew : un utilisateur sur deux peut abandonner à l'installation d'une app non notarisée.
-- Découvrabilité (U1/U2) si non traitée.
+- Découvrabilité : état vide corrigé ; une galerie **remplie** garde les commandes masquées au repos (choix de direction artistique conservé).
 - Suppression définitive sans Corbeille (C6) : un clic mal compris = perte de fichier, avec confirmation.
-- Code non compilé dans `db5bf65` tant que l'étape 9.1 n'est pas faite.
+- 0.1.3 (build 4) est déjà publiée : toute correction livrée samedi exige **0.1.4 / build 5**, sinon Sparkle ne propose rien.
 - macOS 26 non testé.
 
 ## 11. Checklist de distribution
@@ -153,6 +168,8 @@ Aucune modification visuelle ni de comportement utilisateur n'a été faite sans
 **NO-GO en l'état** — non parce que le code est mauvais, mais parce que rien n'a été validé
 dynamiquement depuis le 24/10 et que le parcours d'installation et de premier lancement n'a pas été
 éprouvé sur une machine propre.
+
+**Mise à jour 5/11** : vérification 1 faite (code 0) ; U1/U2 corrigés ; restent les vérifications 2 à 4, puis passage en 0.1.4 / build 5.
 
 **GO WITH RISKS** dès que les quatre vérifications bloquantes du §9 passent, en acceptant C6 et
 la non-notarisation, et à condition de trancher U1/U2 (correctif recommandé, faible risque, ~1 h).
