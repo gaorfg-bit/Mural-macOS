@@ -43,7 +43,10 @@ ENTREES=(
   "$NOM/scripts/test-source-archive.sh"
 )
 
-COPYFILE_DISABLE=1 tar -czf "$TEMP" -C "$PARENT" "${ENTREES[@]}"
+# L'archive part de l'arbre de travail : exclure les metadonnees Finder
+# (ignorees par git mais recreees par le Finder dans src/, docs/...).
+COPYFILE_DISABLE=1 tar -czf "$TEMP" --exclude '.DS_Store' --exclude '._*' \
+  -C "$PARENT" "${ENTREES[@]}"
 mv "$TEMP" "$ARCHIVE"
 (cd "$DESTINATION" && shasum -a 256 "$(basename "$ARCHIVE")") > "$EMPREINTE"
 printf 'Archive source prete : %s\n' "$ARCHIVE"

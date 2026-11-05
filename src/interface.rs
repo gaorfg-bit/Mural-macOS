@@ -117,6 +117,8 @@ pub struct RacineIvars {
     suivi: RefCell<Option<Retained<NSTrackingArea>>>,
     outils: RefCell<Option<Retained<NSView>>>,
     dossiers: RefCell<Option<Retained<NSView>>>,
+    /// Commandes maintenues visibles (galerie vide) : rien a decouvrir au survol.
+    epingle: Cell<bool>,
 }
 define_class!(
     #[unsafe(super(NSView))]
@@ -142,6 +144,7 @@ define_class!(
         fn bouger(&self, evenement: &NSEvent) {
             let p = self.convertPoint_fromView(evenement.locationInWindow(), None);
             let h = self.bounds().size.height;
+            if self.ivars().epingle.get() { return; }
             if let Some(outils) = self.ivars().outils.borrow().as_ref() {
                 if p.y >= h-14.0 { outils.setHidden(false); self.boutons_fenetre(false); }
                 else if p.y < outils.frame().origin.y - 8.0 {
@@ -157,7 +160,9 @@ define_class!(
             }
         }
         #[unsafe(method(mouseExited:))]
-        fn sortir(&self, _evenement: &NSEvent) { self.masquer(); }
+        fn sortir(&self, _evenement: &NSEvent) {
+            if !self.ivars().epingle.get() { self.masquer(); }
+        }
     }
 );
 impl Racine {
@@ -166,6 +171,7 @@ impl Racine {
             suivi: RefCell::new(None),
             outils: RefCell::new(None),
             dossiers: RefCell::new(None),
+            epingle: Cell::new(false),
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -173,6 +179,18 @@ impl Racine {
         *self.ivars().outils.borrow_mut() = Some(outils.retain());
         *self.ivars().dossiers.borrow_mut() = Some(dossiers.retain());
         self.masquer();
+    }
+    /// Maintient barre d'outils, panneau dossiers et boutons de fenetre visibles
+    /// tant que `epingle` est vrai. Au retour a faux, rien n'est masque d'un coup :
+    /// le prochain mouvement de souris reprend le comportement habituel.
+    pub fn epingler(&self, epingle: bool) {
+        if self.ivars().epingle.replace(epingle) == epingle { return; }
+        if epingle {
+            self.boutons_fenetre(false);
+            for panneau in [&self.ivars().outils, &self.ivars().dossiers] {
+                if let Some(v) = panneau.borrow().as_ref() { v.setHidden(false); }
+            }
+        }
     }
     pub fn reveler(&self) {
         self.boutons_fenetre(false);
