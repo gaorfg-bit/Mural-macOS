@@ -61,7 +61,7 @@ impl Cible {
         let generation = ivars.generation_grille.get().wrapping_add(1);
         ivars.generation_grille.set(generation);
         // Aucun emprunt de l'etat pendant les notifications synchrones AppKit.
-        let (affiches, filtre) = {
+        let (affiches, filtre, vide) = {
             let mut etat = self.etat_mut();
             etat.cellules.clear();
             etat.boutons.clear();
@@ -69,7 +69,9 @@ impl Cible {
                 index, etat.images[index].clone(), etat.vignettes[index].clone(),
                 etat.vignettes_en_attente[index],
             )).collect::<Vec<_>>();
-            (images, etat.filtre.clone())
+            let vide = images.is_empty().then(|| message_galerie_vide(
+                &etat.dossier, etat.dossier.is_dir(), etat.images.is_empty(), &etat.filtre));
+            (images, etat.filtre.clone(), vide)
         };
         // Les deux symboles des badges sont resolus une fois, pas pour chaque cellule.
         let symbole_actif = symbole("checkmark.circle.fill");
@@ -178,6 +180,14 @@ impl Cible {
             boutons.push(bouton.clone());
         }
 
+        if let Some((texte, proposer_dossier)) = &vide {
+            self.poser_etat_vide(document, defilement.contentSize(), texte, *proposer_dossier);
+        }
+        // Galerie vide (hors recherche) : rien a survoler, les commandes restent visibles.
+        if let Some(surface) = ivars.surface.borrow().as_ref() {
+            surface.epingler(vide.as_ref().is_some_and(|(_, proposer)| *proposer));
+        }
+
         let lignes = affiches.len().div_ceil(colonnes.max(1));
         let hauteur_document = 8.0 + lignes as f64 * hauteur_cellule + lignes.saturating_sub(1) as f64 * ESPACEMENT;
         unsafe {
@@ -208,6 +218,34 @@ impl Cible {
         }
         defilement.contentView().setPostsBoundsChangedNotifications(true);
         self.charger_zone_visible();
+    }
+
+    /// Message centre dans la grille quand rien n'est affiche. La vue est un
+    /// enfant du document : la prochaine reconstruction la retire avec les cellules.
+    fn poser_etat_vide(&self, document: &NSView, taille: NSSize, texte: &str, proposer_dossier: bool) {
+        let Some(mtm) = MainThreadMarker::new() else { return; };
+        let largeur = (taille.width - 48.0).clamp(120.0, 420.0);
+        let message = NSTextField::wrappingLabelWithString(&NSString::from_str(texte), mtm);
+        message.setAlignment(objc2_app_kit::NSTextAlignment::Center);
+        message.setTextColor(Some(&NSColor::secondaryLabelColor()));
+        message.setFont(Some(&NSFont::systemFontOfSize(13.0)));
+        message.setPreferredMaxLayoutWidth(largeur);
+        let hauteur_texte = message.fittingSize().height.max(18.0);
+        let hauteur_bouton = if proposer_dossier { 36.0 } else { 0.0 };
+        // Document retourne : y croit vers le bas.
+        let haut = ((taille.height - hauteur_texte - hauteur_bouton) / 2.0).max(8.0);
+        message.setFrame(NSRect::new(NSPoint::new((taille.width - largeur) / 2.0, haut),
+            NSSize::new(largeur, hauteur_texte)));
+        document.addSubview(&message);
+        if proposer_dossier {
+            let bouton = unsafe { NSButton::buttonWithTitle_target_action(
+                &NSString::from_str("Open folder…"), Some(self), Some(sel!(ouvrirDossier:)), mtm) };
+            bouton.setToolTip(Some(&NSString::from_str("Choose a folder of images (⌘O)")));
+            let largeur_bouton = bouton.fittingSize().width.max(140.0);
+            bouton.setFrame(NSRect::new(NSPoint::new((taille.width - largeur_bouton) / 2.0, haut + hauteur_texte + 10.0),
+                NSSize::new(largeur_bouton, 28.0)));
+            document.addSubview(&bouton);
+        }
     }
 
     /// Reapplique l'etat : apercu, informations, libelle du bouton, selection.
@@ -342,5 +380,46 @@ impl Cible {
                 }
             }
         }
+    }
+}
+
+/// Texte de la galerie vide et s'il faut proposer d'ouvrir un dossier.
+/// `aucune_image` : le dossier ne contient aucune image affichable (avant filtre).
+pub(super) fn message_galerie_vide(dossier: &std::path::Path, existe: bool, aucune_image: bool, filtre: &str) -> (String, bool) {
+    if !existe {
+        return (format!("This folder is unavailable:\n{}\nReconnect its disk or choose another folder.", dossier.display()), true);
+    }
+    if aucune_image || filtre.is_empty() {
+        let nom = dossier.file_name().map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| dossier.display().to_string());
+        return (format!("No images in “{nom}”.\nChoose a folder of PNG, JPEG or WebP images."), true);
+    }
+    (format!("No images match “{filtre}”."), false)
+}
+
+#[cfg(test)]
+mod tests_galerie_vide {
+    use super::message_galerie_vide;
+    use std::path::Path;
+
+    #[test]
+    fn dossier_absent_propose_un_autre_dossier() {
+        let (texte, proposer) = message_galerie_vide(Path::new("/Volumes/Disque/Fonds"), false, true, "");
+        assert!(texte.contains("unavailable") && texte.contains("/Volumes/Disque/Fonds"));
+        assert!(proposer);
+    }
+
+    #[test]
+    fn dossier_sans_image_nomme_le_dossier() {
+        let (texte, proposer) = message_galerie_vide(Path::new("/Users/x/Pictures"), true, true, "");
+        assert!(texte.contains("“Pictures”"));
+        assert!(proposer);
+    }
+
+    #[test]
+    fn recherche_sans_resultat_ne_bloque_pas_les_commandes() {
+        let (texte, proposer) = message_galerie_vide(Path::new("/Users/x/Pictures"), true, false, "plage");
+        assert_eq!(texte, "No images match “plage”.");
+        assert!(!proposer);
     }
 }
