@@ -115,7 +115,7 @@ la galerie est vide ou à la première ouverture, et afficher au centre de la gr
 | `db5bf65` | `bibliotheque.rs` : ignore les fichiers commençant par `.` ; test `lister_ignore_les_fichiers_caches_et_appledouble` | **Compilé et testé le 5/11** (`valider.sh` code 0) |
 | (5/11, non committé) | `scripts/archiver-source.sh` : exclusion des métadonnées Finder (C11) | `test-source-archive.sh` OK, 74 entrées |
 | (5/11, non committé) | `preferences.rs` : `sync_all` avant `rename` (C8) | 19 tests `preferences` + `valider.sh` code 0 |
-| (5/11, non committé, **accord utilisateur**) | U1/U2 : `interface::Racine::epingler` garde barre d'outils, panneau dossiers et boutons de fenêtre visibles tant que la galerie est vide (hors recherche) ; `grille::message_galerie_vide` + bouton « Open folder… » au centre de la grille : dossier introuvable (disque débranché, chemin affiché), dossier sans image, recherche sans résultat (sans épinglage). Galerie remplie : comportement inchangé | 3 tests unitaires ; rendu hors écran des cas « vide » et « introuvable » (composition) ; `valider.sh` code 0, 123 tests ; **épinglage au survol non observé à l'écran** |
+| (5/11, non committé, **accord utilisateur**) | U1/U2 : `interface::Racine::epingler` garde barre d'outils, panneau dossiers et boutons de fenêtre visibles tant que la galerie est vide (hors recherche) ; `grille::message_galerie_vide` + bouton « Open folder… » au centre de la grille : dossier introuvable (disque débranché, chemin affiché), dossier sans image, recherche sans résultat (sans épinglage). Galerie remplie : comportement inchangé | 3 tests unitaires ; rendu hors écran des cas « vide » et « introuvable » (composition) ; `valider.sh` code 0, 123 tests ; **vérifié à l'écran le 5/11** (copie isolée `com.faux.mural.recette`) : commandes visibles au repos sur galerie vide ; après ouverture d'un dossier de 3 images, survol du haut → barre affichée, souris au milieu → barre masquée |
 
 Aucune modification visuelle ni de comportement utilisateur n'a été faite sans accord.
 
@@ -134,7 +134,7 @@ Aucune modification visuelle ni de comportement utilisateur n'a été faite sans
 **Bloquantes avant publication**
 1. ~~`./scripts/valider.sh` sur la branche~~ **Fait le 5/11, code 0** (voir §8).
 2. Installation propre : nouveau compte macOS, `brew install --cask gaorfg-bit/mural/mural-macos`, premier lancement via Réglages → Confidentialité → « Ouvrir quand même ». Noter chaque friction.
-3. Premier lancement avec un `~/Pictures` sans image au premier niveau : vérifier **à l'écran** que les commandes restent visibles et que « Open folder… » central fonctionne, puis qu'elles se masquent à nouveau une fois un dossier rempli ouvert.
+3. ~~Premier lancement avec une galerie vide~~ **Fait le 5/11 à l'écran** (copie isolée, aucun fond appliqué). Reste à le refaire sur une installation propre (point 2) : que les commandes restent visibles et que « Open folder… » central fonctionne, puis qu'elles se masquent à nouveau une fois un dossier rempli ouvert.
 4. Mise à jour Sparkle réelle de la version publiée précédente vers celle de samedi (téléchargement, remplacement, relance, réglages conservés).
 
 **Recommandées**
