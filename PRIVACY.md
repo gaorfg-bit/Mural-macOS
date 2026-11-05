@@ -1,7 +1,7 @@
 # Privacy notice — Mural for macOS
 
 Last reviewed: 5 November 2026
-Scope: Mural macOS 0.1.3 in this source tree. This notice describes the application code reviewed for the pilot; review it again for every release.
+Scope: Mural macOS 0.1.4 in this source tree. This notice describes the application code reviewed for the pilot; review it again for every release.
 
 ## Data handled on your Mac
 
@@ -15,7 +15,7 @@ Mural uses macOS to apply a wallpaper to the display you choose and to open loca
 
 ## Network and third parties
 
-The Mural 0.1.3 application source reviewed for this notice contains no analytics, advertising, account service, or application code that uploads your library, settings, logs, or images. Sparkle 2 checks for updates automatically once a day over HTTPS. The check goes to `mural-updates.mural-updates.workers.dev`, a small Cloudflare Worker run by the developer, which redirects to the `appcast.xml` file of the latest GitHub release (gaorfg-bit/homebrew-mural). The Worker keeps aggregate counters of update checks per day, Mural version and major macOS version, read from the standard request; it does not store your IP address or any identifier. Cloudflare and GitHub receive standard connection information such as your IP address, as with any web request. An update is downloaded from GitHub only when you choose to install it. System profiling is disabled. No library paths, images, favorites, or diagnostic logs are sent by this update integration. Update preferences are stored by Sparkle in macOS user defaults. macOS diagnostics or network activity by other software on your Mac are outside Mural's control.
+The Mural 0.1.4 application source reviewed for this notice contains no analytics, advertising, account service, or application code that uploads your library, settings, logs, or images. Sparkle 2 checks for updates automatically once a day over HTTPS. The check goes to `mural-updates.mural-updates.workers.dev`, a small Cloudflare Worker run by the developer, which redirects to the `appcast.xml` file of the latest GitHub release (gaorfg-bit/homebrew-mural). The Worker keeps aggregate counters of update checks per day, Mural version and major macOS version, read from the standard request; it does not store your IP address or any identifier. Cloudflare and GitHub receive standard connection information such as your IP address, as with any web request. An update is downloaded from GitHub only when you choose to install it. System profiling is disabled. No library paths, images, favorites, or diagnostic logs are sent by this update integration. Update preferences are stored by Sparkle in macOS user defaults. macOS diagnostics or network activity by other software on your Mac are outside Mural's control.
 
 The optional Ko-fi link is provided on the project README, not embedded in the desktop app. Opening it takes you to Ko-fi in your browser; Ko-fi's own privacy terms then apply. Supporting the project is optional and is not required to use Mural.
 
